@@ -1,0 +1,3 @@
+﻿/.vscode/*
+/obj/*
+rocksdb-fuse
