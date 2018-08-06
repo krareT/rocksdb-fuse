@@ -53,14 +53,12 @@ int main(int argc, char* argv[])
 		strdup(argv[0]),
 		strdup("-o"),
 		strdup("auto_unmount"),
-		strdup("-o"),
-		strdup("big_writes")
 	};
 	for (auto idx = 1; idx < argc; idx++)
 		arg_list.push_back(strdup(argv[idx]));
 	
 
-    struct fuse_args args = FUSE_ARGS_INIT(argc + 4, arg_list.data());
+    struct fuse_args args = FUSE_ARGS_INIT(static_cast<int>(arg_list.size()), arg_list.data());
     struct myfs_opts config{};
     if (fuse_opt_parse(&args, &config, option_spec, process_arg))
     {
