@@ -65,6 +65,18 @@ namespace
 	{
 		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Link(oldpath, newpath);
 	}
+	int s_flush(const char* , struct fuse_file_info* fi)
+    {
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Flush(fi);
+    }
+	int s_chmod(const char * path, mode_t mode, struct fuse_file_info *fi)
+    {
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Chmod(path, mode, fi);
+    }
+	int s_chown(const char * path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
+    {
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Chown(path, uid, gid, fi);
+    }
 }
 
 int RocksFs::Mount(int argc, char* argv[])
@@ -85,5 +97,8 @@ int RocksFs::Mount(int argc, char* argv[])
     res.mkdir = s_mkdir;
     res.rmdir = s_rmdir;
 	res.link = s_link;
+	res.flush = s_flush;
+	res.chown = s_chown;
+	res.chmod = s_chmod;
     return fuse_main(argc, argv, &res, this);
 }

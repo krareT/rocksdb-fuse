@@ -29,6 +29,9 @@ namespace rocksfs
 		int Rename(const std::string& oldpath, const std::string& newpath, unsigned flags);
 		int Truncate(off_t offset, struct fuse_file_info *fi);
 		int Link(const std::string& oldpath, const std::string& newpath);//创建硬链接
+		int Flush(fuse_file_info* fi);
+		int Chmod (const std::string& path, mode_t, struct fuse_file_info *fi);
+		int Chown(const std::string& path, uid_t, gid_t, struct fuse_file_info *fi);
 		rocksdb::ColumnFamilyHandle* hIndex;
 		rocksdb::ColumnFamilyHandle* hData;
 		rocksdb::ColumnFamilyHandle* hAttr;

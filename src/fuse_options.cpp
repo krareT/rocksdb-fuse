@@ -14,7 +14,7 @@
 #include "fuse_options.hpp"
 #include "util.hpp"
 #include "attr.hpp"
-struct Guard;
+
 using namespace rocksdb;
 using namespace rocksfs;
 using namespace std;
@@ -1131,5 +1131,78 @@ int rocksfs::RocksFs::Link(const std::string& src_path, const std::string& newpa
 	if (!s.ok())
 		return -EIO;
 
+	return 0;
+}
+
+int RocksFs::Flush(fuse_file_info* fi)
+{
+	return 0;
+}
+
+int RocksFs::Chmod(const std::string& path, mode_t mode, fuse_file_info* fi)
+{
+	Txn txn(db->BeginTransaction(WriteOptions()));
+	string attr_buf;
+	string encoded_inode;
+	if(!fi)
+	{
+		auto idx = GetIndexAndLock(path, txn);
+		if (idx.Bad())
+			return idx.inode;
+		encoded_inode = idx.Key();
+		txn->GetForUpdate(ReadOptions(), hAttr, idx.Key(),&attr_buf);
+	}
+	else
+	{
+		encoded_inode = Encode(fi->fh);
+		txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &attr_buf);
+	}
+	//TODO for symlnk
+	Attr attr;
+	if (!Attr::Decode(attr_buf, &attr))
+		return -EIO;
+	
+	if (fuse_get_context()->gid != 0 && attr.uid != fuse_get_context()->gid)
+		return -EPERM;
+	
+	attr.mode = mode;
+	attr.ctime = Now();
+	txn->Put(hAttr, encoded_inode, attr.Encode());
+	if (!txn->Commit().ok())
+		return -EIO;
+	return 0;
+}
+
+int rocksfs::RocksFs::Chown(const std::string& path, uid_t uid, gid_t gid, fuse_file_info * fi)
+{
+	Txn txn(db->BeginTransaction(WriteOptions()));
+	string attr_buf;
+	string encoded_inode;
+	if (!fi)
+	{
+		auto idx = GetIndexAndLock(path, txn);
+		if (idx.Bad())
+			return idx.inode;
+		encoded_inode = idx.Key();
+		txn->GetForUpdate(ReadOptions(), hAttr, idx.Key(), &attr_buf);
+	}
+	else
+	{
+		encoded_inode = Encode(fi->fh);
+		txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &attr_buf);
+	}
+	//TODO for symlnk
+	Attr attr;
+	if (!Attr::Decode(attr_buf, &attr))
+		return -EIO;
+	if (fuse_get_context()->gid != 0 && attr.uid != fuse_get_context()->gid)
+		return -EPERM;
+
+	attr.uid = (uid == -1 ? attr.uid : uid);
+	attr.gid = (gid == -1 ? attr.gid : gid);
+	attr.ctime = Now();
+	txn->Put(hAttr, encoded_inode, attr.Encode());
+	if (!txn->Commit().ok())
+		return -EIO;
 	return 0;
 }

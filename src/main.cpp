@@ -10,7 +10,7 @@ using namespace rocksfs;
 * different values on the command line.
 */
 struct myfs_opts {
-    char* dbpath = nullptr;
+	char* dbpath = nullptr;
 	int is_help;
 }myfs_opts;
 
@@ -20,11 +20,13 @@ static const char *usage =
 "Usage: ./rocksdb-fuse [options] <mountpoint>\n\n"
 "options:\n"
 "	--help|-h       Print this help message\n"
-"	--dbpath=<s>    The path for database files.\n"	
+"	--dbpath=<s>    The path for database files.\n"
+"	-o allow_other	Allow other users to access the files."
+"   -o allow_root	This option is similar to allow_other but file access is limited to the user mounting the filesystem and root."
 "\n";
 
 static const struct fuse_opt option_spec[] = {
-    MYFS_OPT("--dbpath=%s",dbpath,0),
+	MYFS_OPT("--dbpath=%s",dbpath,0),
 	FUSE_OPT_KEY("-h",		0),
 	FUSE_OPT_KEY("--help",		0),
 	FUSE_OPT_END
@@ -48,38 +50,28 @@ static int process_arg(void* data, const char* arg, int key, struct fuse_args* o
 }
 int main(int argc, char* argv[])
 {
-	//有更好的办法添加这个选项不? ause_put_add_arg不成
-	vector<char*> arg_list{ 
-		strdup(argv[0]),
-		strdup("-o"),
-		strdup("auto_unmount"),
-	};
-	for (auto idx = 1; idx < argc; idx++)
-		arg_list.push_back(strdup(argv[idx]));
-	
-
-    struct fuse_args args = FUSE_ARGS_INIT(static_cast<int>(arg_list.size()), arg_list.data());
-    struct myfs_opts config{};
-    if (fuse_opt_parse(&args, &config, option_spec, process_arg))
-    {
+	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
+	struct myfs_opts config {};
+	if (fuse_opt_parse(&args, &config, option_spec, process_arg))
+	{
 		printf("failed to parse option\n");
-        return 1;
-    }
-    if(config.is_help)
-    {
-        return 0;
-    }
-    else
-    {
-        if (!config.dbpath)
+		return 1;
+	}
+	if (config.is_help)
+	{
+		return 0;
+	}
+	else
+	{
+		if (!config.dbpath)
 		{
 			puts("dbpath not inputed");
-            puts(usage);
+			puts(usage);
 			return 1;
 		}
-    }
-	
-    rocksfs::RocksFs fs(config.dbpath);
-    fs.Mount(args.argc, args.argv);
-    return 0;
+	}
+	fuse_opt_add_arg(&args, "-oauto_unmount");
+	rocksfs::RocksFs fs(config.dbpath);
+	fs.Mount(args.argc, args.argv);
+	return 0;
 }

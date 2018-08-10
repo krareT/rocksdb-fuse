@@ -13,8 +13,10 @@ namespace rocksfs
 		FileIndex(int64_t parentInode, std::string filename);
 		explicit FileIndex(const std::string& inializer);
 		std::string GetFilename()const;
-		std::string Key()const;//return encoded inode
-		std::string Index()const;//return parent:filename
+		//return encoded inode
+		std::string Key()const;
+		//return parent:filename
+		std::string Index()const;
 		int64_t parentInode;
 		int64_t inode = -1;//negative for errno
 		std::string filename;
