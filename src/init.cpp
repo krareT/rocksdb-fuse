@@ -77,6 +77,28 @@ namespace
     {
 		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Chown(path, uid, gid, fi);
     }
+	int s_truncate(const char* path, off_t offset, struct fuse_file_info *fi)
+	{
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Truncate(offset, fi);
+	}
+#ifdef HAVE_SETXATTR
+	int s_setxattr(const char *path, const char *name, const char *value, size_t size, int flags)
+	{
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->SetXattr(path, name, value, size, flags);
+	}
+	int s_getxattr(const char *path, const char *name, char *value, size_t size)
+	{
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->GetXattr(path, name, value, size);
+	}
+	int s_listxattr(const char *path, char *list, size_t size)
+	{
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->ListXattr(path, list, size);
+	}
+	int s_removexattr(const char *path, const char *name)
+	{
+		return static_cast<RocksFs*>(fuse_get_context()->private_data)->RemoveXattr(path, name);
+	}
+#endif // HAVE_SETXATTR
 }
 
 int RocksFs::Mount(int argc, char* argv[])
@@ -100,5 +122,14 @@ int RocksFs::Mount(int argc, char* argv[])
 	res.flush = s_flush;
 	res.chown = s_chown;
 	res.chmod = s_chmod;
+	res.truncate = s_truncate;
+#ifdef HAVE_SETXATTR
+	res.setxattr = s_setxattr;
+	res.getxattr = s_getxattr;
+	res.removexattr = s_removexattr;
+	res.listxattr = s_listxattr;
+#endif // HAVE_SETXATTR
+
+
     return fuse_main(argc, argv, &res, this);
 }

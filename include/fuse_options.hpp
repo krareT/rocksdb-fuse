@@ -32,6 +32,12 @@ namespace rocksfs
 		int Flush(fuse_file_info* fi);
 		int Chmod (const std::string& path, mode_t, struct fuse_file_info *fi);
 		int Chown(const std::string& path, uid_t, gid_t, struct fuse_file_info *fi);
+#ifdef HAVE_SETXATTR
+		int SetXattr(const std::string& path, const std::string& name, const void* value, size_t size, int flags);
+		int GetXattr(const std::string& path, const std::string& name, char * buf, size_t size);
+		int ListXattr(const std::string& path, char* buf, size_t size);
+		int RemoveXattr(const std::string& path, const std::string& name);
+#endif // HAVE_SETXATTR
 		rocksdb::ColumnFamilyHandle* hIndex;
 		rocksdb::ColumnFamilyHandle* hData;
 		rocksdb::ColumnFamilyHandle* hAttr;

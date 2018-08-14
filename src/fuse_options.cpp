@@ -11,6 +11,9 @@
 #include <mutex>
 #include <fcntl.h>
 #include <cerrno>
+#ifdef HAVE_SETXATTR
+#include <attr/xattr.h>
+#endif // HAVE_SETXATTR
 #include "fuse_options.hpp"
 #include "util.hpp"
 #include "attr.hpp"
@@ -1206,3 +1209,77 @@ int rocksfs::RocksFs::Chown(const std::string& path, uid_t uid, gid_t gid, fuse_
 		return -EIO;
 	return 0;
 }
+#ifdef HAVE_SETXATTR
+//TODO 权限检测
+int rocksfs::RocksFs::SetXattr(const std::string& path, const std::string& name, const void* value, size_t size, int flags)
+{
+
+	Txn txn;
+	auto fidx = GetIndexAndLock(path, txn);
+	if (fidx.Bad())
+		return fidx.inode;
+	Slice xattr_val(static_cast<const char*>(value), size);
+	//TODO 权限检测
+	txn->Put(hAttr, fidx.Key() + name, xattr_val);
+	if (!txn->Commit().ok())
+		return -EIO;
+
+	return 0;
+}
+
+int rocksfs::RocksFs::GetXattr(const std::string& path, const std::string& name, char* buf, size_t size)
+{
+	auto fidx = GetIndex(path);
+	if (fidx.Bad())
+		return fidx.inode;
+	PinnableSlice slice;
+	Status s = db->Get(ReadOptions(), hAttr, fidx.Key() + name, &slice);
+	CheckStatus(s);
+	if (size)
+		memcpy(buf, slice.data(), std::min(size, slice.size()));
+
+	return 0;
+}
+//TODO 权限检测
+int rocksfs::RocksFs::ListXattr(const std::string& path, char* buf, size_t size)
+{
+
+	auto idx = GetIndex(path);
+	if (idx.Bad())
+		return idx.inode;
+	unique_ptr<Iterator> itor(db->NewIterator(ReadOptions(), hAttr));
+	itor->Seek(path);
+	const auto size_orig = size;
+	for (itor->Next(); itor->key().starts_with(idx.Key()); itor->Next())
+	{
+		if (itor->value().size() >= size)
+			return -ERANGE;
+		memcpy(buf, itor->key().data(), itor->key().size());
+		buf += itor->key().size();
+		*buf = '\0';
+		buf += 1;
+		size -= itor->key().size() + 1;
+	}
+	return size_orig - size;
+}
+//TODO 权限检测
+int rocksfs::RocksFs::RemoveXattr(const std::string& path, const std::string & name)
+{
+
+	auto idx = GetIndex(path);
+	if (idx.Bad())
+		return idx.inode;
+	unique_ptr<Iterator> itor(db->NewIterator(ReadOptions(), hAttr));
+	PinnableSlice slice;
+	Txn txn;
+	Status s = txn->GetForUpdate(ReadOptions(), hAttr, idx.Key() + name, &slice);
+	if (s.IsNotFound())
+		return -ENOATTR;
+	txn->Delete(hAttr, idx.Key() + name);
+	txn->Commit();
+	return 0;
+}
+#endif // HAVE_SETXATTR
+
+
+

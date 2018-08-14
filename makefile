@@ -1,7 +1,7 @@
 ﻿
 # 指令编译器和选项
 CC = g++
-DEF = __KERNEL__ _FILE_OFFSET_BITS=64
+DEF = __KERNEL__ _FILE_OFFSET_BITS=64 HAVE_SETXATTR
 LIBS = fuse3
 INCLUDEDIR = -Iinclude
 INCLUDEDIR += $(shell pkg-config --cflags $(LIBS))
