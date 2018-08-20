@@ -1,4 +1,5 @@
-﻿#include <rocksdb/slice.h>
+﻿#include <unistd.h>
+#include <rocksdb/slice.h>
 #include "fuse_options.hpp"
 using namespace std;
 using namespace rocksfs;
@@ -48,6 +49,7 @@ static int process_arg(void* data, const char* arg, int key, struct fuse_args* o
 		return 1;
 	}
 }
+void ChangeToDaemon();
 int main(int argc, char* argv[])
 {
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
@@ -71,7 +73,35 @@ int main(int argc, char* argv[])
 		}
 	}
 	fuse_opt_add_arg(&args, "-oauto_unmount");
+	fuse_opt_add_arg(&args,("-f"));
+	ChangeToDaemon();
+	
 	rocksfs::RocksFs fs(config.dbpath);
 	fs.Mount(args.argc, args.argv);
 	return 0;
+}
+
+void ChangeToDaemon()
+{
+	auto pid = fork();
+	switch (pid)
+	{
+	case -1:puts("fork error."); exit(1);
+	case 0:break;
+	default:exit(0);
+	}
+	if (setsid() == -1)
+	{
+		puts("setsid error.\n");
+		exit(1);
+	}
+	pid = fork();
+	switch (pid)
+	{
+	case -1:puts("fork error."); exit(1);
+	case 0:break;
+	default:exit(0);
+	}
+	chdir("/");
+	umask(0);
 }

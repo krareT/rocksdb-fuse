@@ -24,9 +24,10 @@ void Attr::Fill(struct stat* st) const
 	st->st_gid = gid;
 	st->st_size = size;
 	st->st_nlink = nlink;
-	//st->st_blksize = 4096;
-	//st->st_ino = inode;
-	//st->st_blocks = static_cast<int32_t>(std::ceil((size + 0.0) / 4096));
+	st->st_blksize = 4096;
+	st->st_ino = inode;
+	//TODO 文件存在空洞时的块数维护支持，目前假装不支持空洞。
+	st->st_blocks = (size + 4096 - 1) / 4096;
 
 }
 

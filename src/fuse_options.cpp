@@ -99,7 +99,7 @@ RocksFs::RocksFs(const std::string& path)
 {
 	std::vector<ColumnFamilyDescriptor> descriptors;
 	descriptors.emplace_back(ColumnFamilyDescriptor(kDefaultColumnFamilyName, ColumnFamilyOptions()));
-	descriptors.emplace_back(ColumnFamilyDescriptor("Data", ColumnFamilyOptions()));
+	//descriptors.emplace_back(ColumnFamilyDescriptor("Data", ColumnFamilyOptions()));
 	descriptors.emplace_back(ColumnFamilyDescriptor("Index", ColumnFamilyOptions()));
 	descriptors.emplace_back(ColumnFamilyDescriptor("Attr", ColumnFamilyOptions()));
 	descriptors.emplace_back(ColumnFamilyDescriptor("DeletedFile", ColumnFamilyOptions()));
@@ -118,11 +118,11 @@ RocksFs::RocksFs(const std::string& path)
 		printf("open database error at %s\nerror:%s", path.c_str(), s.getState());
 		exit(0);
 	}
-	dbPtr->DestroyColumnFamilyHandle(handles[0]);
-	hData = handles[1];
-	hIndex = handles[2];
-	hAttr = handles[3];
-	hDeleted = handles[4];
+	//dbPtr->DestroyColumnFamilyHandle(handles[0]);
+	hData = handles[0];
+	hIndex = handles[1];
+	hAttr = handles[2];
+	hDeleted = handles[3];
 	db = dbPtr;
 	unique_ptr<Iterator> itor(db->NewIterator(ReadOptions(), hAttr));
 	itor->SeekToLast();
@@ -280,8 +280,6 @@ int RocksFs::Open(const std::string& path, fuse_file_info * fi)
 	{
 		return -EISDIR;
 	}
-	if ((fi->flags&O_ACCMODE) == O_RDWR)//现在不允许rw方式打开，只允许追加
-		return -EPERM;//操作不允许
 
 	unsigned open_flags = 0;
 	switch(fi->flags)
@@ -294,9 +292,9 @@ int RocksFs::Open(const std::string& path, fuse_file_info * fi)
 
 	if (!Accessable(attr, open_flags))
 		return -EACCES;
-
-	if ((fi->flags&O_ACCMODE) != O_RDONLY)
+	if (fi->flags & O_APPEND)
 		fi->nonseekable = true;
+	
 
 	if ((fi->flags&O_ACCMODE) == O_WRONLY && !(fi->flags & O_APPEND))//如果不是追加(清零写)则需要修改文件属性
 	{
@@ -313,26 +311,22 @@ int RocksFs::Open(const std::string& path, fuse_file_info * fi)
 		{
 			txn->Delete(itor->key());
 		}
-		txn->Put(hData, PageIndex(index.Key(),0), "");
-
 	}
 	if (!txn->Commit().ok())
 		return -EIO;
 
 	fi->fh = index.inode;
 	opening_files.Open(fi->fh);
-
-	return 0;
+	if(fi->fh)
+		return 0;
 }
 
-int RocksFs::Read(char * buf, size_t size, off_t offset, fuse_file_info * fi)
+int RocksFs::Read(char* buf, size_t size, off_t offset, fuse_file_info* fi)
 {
 	if (!fi)
 		return -EIO;
 
-	string idx = Encode(fi->fh);
-
-
+	const string encoded_inode = Encode(fi->fh);	
 	
 	Txn txn{ db->BeginTransaction(WriteOptions()) };
 
@@ -358,40 +352,88 @@ int RocksFs::Read(char * buf, size_t size, off_t offset, fuse_file_info * fi)
 	//将size重置到可读范围
 	const off_t file_size = attr.size;
 	if (offset < file_size && offset + static_cast<off_t>(size) > file_size)
-		size = file_size - offset;//offset > size ?
+		size = file_size - offset;
+
 	const auto read_size = size;
-	itor->Seek(PageIndex(fi->fh, offset));
+	while (size > 0)
 	{
-		//从offset开始，第一块剩余数据长度
-		const auto first_page_left = (offset / kPageSize + 1)*kPageSize - offset;
-		Slice page = itor->value();
-		memcpy(buf, page.data(), first_page_left);
-		buf += first_page_left;
-		size -= first_page_left;
-		itor->Next();
-	}
-	while (static_cast<ssize_t>(size )> 0)
-	{
-		assert(itor->Valid());
-		Slice page = itor->value();
-		if (size > kPageSize)
+		PinnableSlice slice;
+		auto s = txn->Get(ReadOptions(),hData, PageIndex(encoded_inode, offset), &slice);
+		const auto read_start = offset % kPageSize;
+		const auto read_end = std::min<int>(read_start + size, kPageSize);
+		const auto read_bytes = read_end - read_start;
+		if (s.ok())//block存在
 		{
-			memcpy(buf, page.data(), kPageSize);
-			buf += kPageSize;
-			size -= kPageSize;
+			const int64_t zero_bytes = read_end - slice.size();
+
+			assert(read_end <= kPageSize);
+			if (read_start < slice.size())//起始处有slice数据
+			{	
+				if (zero_bytes <= 0)//全部在slice内读取
+				{
+					//|----------slice-----------|
+					//start               slice.size()       4k
+					//|__________________________|-----------|
+					//      |-----size-----|
+					//   read_start     read_end
+					//      |--read_bytes--|
+					memcpy(buf, slice.data() + offset % kPageSize, size);
+					offset += read_bytes;
+					buf += read_bytes;
+					size -= read_bytes;
+				}
+				else//读取数据有一部分在slice之外(但小于4k)，zero_bytes > 0 
+				{
+					//|-------slice--------|
+					//start               slice.size()              4k
+					//|_______________________|---------------------|
+					//      |--------------size------------------|
+					//                        |---zero_bytes----|
+					//      |------------read_bytes-------------|
+					//   read_start                       read_end
+					//      |-block_read_size-|
+					const auto block_read_size = read_end - zero_bytes;
+					memcpy(buf, slice.data() + read_start, block_read_size);
+					buf += block_read_size;
+					bzero(buf, zero_bytes);
+					buf += zero_bytes;
+					size -= read_bytes;
+					offset += read_bytes;
+				}
+			}
+			else//读取部分在块空洞中,offset%4k >= slize.size() 
+			{
+				//|-------Slice-------|
+				//start        slice.size()       4k
+				//|___________________|------------------|
+				//                      |-----size-----|
+				//                   offset%4k         |
+				//                      |--read_bytes--|
+				bzero(buf, read_bytes);
+				offset += read_bytes;
+				buf += read_bytes;
+				size -= read_bytes;
+			}
 		}
-		else
+		else//没有这个块，逻辑同上
 		{
-			memcpy(buf, page.data(), size);
-			break;
+			const auto read_bytes = std::min<int>(kPageSize, offset%kPageSize + size) - offset % kPageSize;
+			bzero(buf, read_bytes);
+
+			offset += read_bytes;
+			buf += read_bytes;
+			size -= read_bytes;
 		}
-		itor->Next();
 	}
 	return static_cast<int>(read_size);
 }
-
+//TODO sticky
 int RocksFs::Create(const std::string& path, mode_t mode, fuse_file_info* fi)
 {
+	if (mode & (S_IFCHR | S_IFIFO | S_IFBLK))//不支持字符设备、管道以及块设备创建
+		return -ENOTSUP;
+
+
 	if (path == "/")
 		return -EEXIST;
 
@@ -402,18 +444,21 @@ int RocksFs::Create(const std::string& path, mode_t mode, fuse_file_info* fi)
 	if (parentIdx.Bad())
 		return static_cast<int>(parentIdx.inode);//errno
 
-	auto fIdx = FileIndex(parentIdx.inode, fs::path(path).filename().generic_string());
-	
+	auto file_index = FileIndex(parentIdx.inode, fs::path(path).filename().generic_string());
+
 	string par_attr_buf;
 	Status s = txn->GetForUpdate(ReadOptions(), hAttr, parentIdx.Key(), &par_attr_buf);
 	CheckStatus(s);
 	string ignore;
-	s = txn->GetForUpdate(ReadOptions(), hIndex, fIdx.Index(), &ignore);
-	if (s.ok())
-		return -EEXIST;
-	if (!s.IsNotFound())
+	s = txn->GetForUpdate(ReadOptions(), hIndex, file_index.Index(), &ignore);
+	if (s.ok())//文件存在是否需要检测权限?
+	{
+		//Trunc file
+		db->DeleteRange(WriteOptions(), hData, file_index.Index(), file_index.Index() + kMaxEncodedIdx);
+	}
+	else if (!s.IsNotFound())
 		return -EIO;
-	
+
 	string parAttrBuf;
 	txn->GetForUpdate(ReadOptions(), hAttr, parentIdx.Key(), &parAttrBuf);
 	Attr parAttr{};
@@ -421,19 +466,25 @@ int RocksFs::Create(const std::string& path, mode_t mode, fuse_file_info* fi)
 	{
 		return -EIO;
 	}
-	fIdx.inode = inodeCounter++;
-	parAttr.atime = parAttr.ctime = Now();
+
 	auto attr = Attr::CreateNormal();
-	attr.inode = fIdx.inode;
-	txn->Put(hIndex, fIdx.Index(), fIdx.Key());
-	txn->Put(hAttr, fIdx.Key(), attr.Encode());
+	if (s.IsNotFound())
+	{
+		file_index.inode = inodeCounter++;
+	}
+
+	parAttr.atime = parAttr.ctime = Now();
+	attr.mode = mode;
+	attr.inode = file_index.inode;
+	txn->Put(hIndex, file_index.Index(), file_index.Key());
+	txn->Put(hAttr, file_index.Key(), attr.Encode());
 	txn->Put(hAttr, parentIdx.Key(), parAttr.Encode());
-	txn->Put(hData, PageIndex(fIdx.inode,0), "");
+
 
 	if (!txn->Commit().ok())
 		return -EIO;
 
-	fi->fh = fIdx.inode;
+	fi->fh = file_index.inode;
 	opening_files.Open(fi->fh);
     return 0;
 }
@@ -543,70 +594,81 @@ int RocksFs::Release(struct fuse_file_info* fi)
 int RocksFs::Write(const char *buf, std::size_t size, off_t offset, struct fuse_file_info *fi)
 {
 
-	const auto write_bits = size;//备份size,写入总数
+	const auto write_bytes = size;//备份size,写入总数
 	if (!fi)
 		return -EIO;
-    const string encoded_inode = Encode(fi->fh);
-    Txn txn{ db->BeginTransaction(WriteOptions()) };
-    string data_buf, arrt_buf;
-    Status s = txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &arrt_buf);
-    CheckStatus(s);
+	const string encoded_inode = Encode(fi->fh);
+	Txn txn{ db->BeginTransaction(WriteOptions()) };
+	string data_buf, arrt_buf;
+	Status s = txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &arrt_buf);
+	CheckStatus(s);
 
-    Attr attr{};
+	Attr attr{};
 	if (!Attr::Decode(arrt_buf, &attr))
 	{
 		return -EIO;
 	}
-        
 
-	//尝试将最后一个块填满
+	//TODO 检查一下这里的flags是否会被填充。
+	if (fi->flags & O_APPEND);
+		offset = attr.size;
+	// page_start  write_start           write_end        page_end
+	//  |__________|_________________________|________________|
+	//             |<---block_write_bytes--->|
+	//  or
+	// page_start  write_start           write_end          page_end
+	//  |__________|_________________________|________________|
+	//             |<---block_write_bytes--->|
+	// where: write_start = offset % 4k
+	while (size > 0)
 	{
-		//itor生命周期
-		unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
-		itor->SeekForPrev(Encode(fi->fh)+kMaxEncodedIdx);//最后一个key,##注意##这样没办法延迟删除
-
-
-#ifndef NDEBUG
-		const string key = itor->key().ToString();
-		const string value = itor->key().ToString();
-		const auto it = itor.get();
-#endif // !NDEBUG
-
-
-		const auto last_blk_left = 
-			std::min<ssize_t>(kPageSize - itor->value().size(),size);//最后一个块剩余空间
-		if (last_blk_left > 0)
+		string data_block;
+		auto block_index = PageIndex(fi->fh, offset);
+		Status s = txn->GetForUpdate(ReadOptions(), hData, block_index, &data_block);
+	
+		const auto write_start = offset % kPageSize;
+		const auto write_end = std::min<int>(write_start + size, kPageSize);
+		const auto block_write_bytes = write_end - write_start;
+		assert(block_write_bytes > 0 && block_write_bytes <= kPageSize);
+		if (s.ok())//有这个块
 		{
-			auto blk = itor->value().ToString();
-			blk.append(buf, last_blk_left);
-			txn->Put(hData, itor->key(), blk);
-			size -= last_blk_left;
-			buf += last_blk_left;
-			attr.size += last_blk_left;
-			assert(blk.size() <= kPageSize);
+			if (data_block.size() < write_end)
+				data_block.resize(write_end);//块不够大则扩容
 		}
-		
+		else if (s.IsNotFound())
+		{
+			data_block = std::string(block_write_bytes, '\0');
+			//TODO 这里可以维护block块数目。
+		}
+		else if (s.IsNoSpace())
+		{
+			return -ENOSPC;
+		}
+		else if (s.IsBusy())
+		{
+			return -EBUSY;
+		}
+		else
+		{
+			return -EIO;
+		}
+		//数据写入块
+		assert(data_block.size() >= write_end);
+		data_block.replace(write_start, block_write_bytes, buf);
+		txn->Put(hData, block_index, data_block);
+		buf += block_write_bytes;
+		size -= block_write_bytes;
+		offset += block_write_bytes;
 	}
 
-	while (static_cast<ssize_t>( size > 0))
-	{
-		const auto bytes = std::min<int64_t>(size, kPageSize);//本次循环写入的字节数
-		string blk{ buf,static_cast<uint>(bytes) };
-		s = txn->Put(hData, encoded_inode + Encode(attr.size / kPageSize + 1), blk);
-		attr.size += bytes;
-		size -= bytes;
-		buf += bytes;
-		if (!s.ok())
-			return -EIO;
-		assert(blk.size() <= kPageSize);
-	}
+	attr.size = attr.size > offset ? attr.size : offset;//此时offset = offset(original) + size(original)
 	attr.mtime = Now();
 
 	txn->Put(hAttr, encoded_inode, attr.Encode());
 	if (!txn->Commit().ok())
 		return -EIO;
 
-    return static_cast<int>(write_bits);
+    return static_cast<int>(write_bytes);
 }
 
 //TODO 确定一下unlink是否需要检查对父目录的权限(FUSE会不会自动处理)
@@ -991,35 +1053,7 @@ int rocksfs::RocksFs::Truncate(off_t offset, fuse_file_info * fi)
 	Attr attr;
 	const bool state = Attr::Decode(attr_buf, &attr);
 	assert(state);
-	if (offset < attr.size)//扩容
-	{
-		//注:这里的最后一个key是可以通过attr.size计算的，这里懒得算了
-		unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
-
-		ssize_t left_bytes = offset - attr.size;//待写入字符数
-		itor->SeekForPrev(encoded_inode + kMaxEncodedIdx);
-		assert(itor->Valid());
-		string blk = itor->value().ToString();
-		const ssize_t blk_size_orig = blk.size();//当前文件最末块的size
-		blk.resize(std::min<size_t>(kPageSize,left_bytes));
-		txn->Put(hData, itor->key(), blk);
-		left_bytes -= blk.size() - blk_size_orig;
-		assert(blk.size() <= kPageSize);
-
-		uint64_t page_index;
-		memcpy(&page_index, itor->key().data() + sizeof(int64_t), sizeof(int64_t));
-		page_index += 1;//待写入page的index
-		while(left_bytes > 0)
-		{
-			const auto this_page_size = std::min<ssize_t>(left_bytes, kPageSize);
-			const string val = string(this_page_size, '\0');
-			txn->Put(hData, PageIndex(encoded_inode, page_index), val);
-			page_index -= this_page_size;
-			page_index += 1;
-			assert(val.size() <= kPageSize);
-		}
-	}
-	else//缩小
+	if (offset < attr.size)//扩容不用管。
 	{
 		unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
 		itor->Seek(PageIndex(encoded_inode, offset));
