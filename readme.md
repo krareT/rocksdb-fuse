@@ -6,8 +6,11 @@ Compile with:
 
 Usage:
 
-    ./rocksdb-fuse --dbpath=<path> <mountpoint>\n
+    ./rocksdb-fuse --dbpath=<path> <mountpoint>
 
+Unmount:
+
+    fusermount -u <mountpoint>
 Depended:
 * rocksdb
 * fuse3.1 or upper

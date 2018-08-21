@@ -3,7 +3,8 @@
 #include <mutex>
 #include <ctime>
 #include <iomanip>
-
+#include <cstddef>
+#include <boost/endian/conversion.hpp>
 namespace rocksfs
 {
 	timespec Now();
@@ -26,5 +27,16 @@ namespace rocksfs
 	std::string Encode(int64_t inode);
 
 	bool StartsWith(const std::string& mainstr, const std::string& substr);
+
+	inline int64_t ReadBigEndian64(const void* p, size_t len = 8)
+	{
+		union {
+			char bytes[8];
+			uint64_t value;
+		} c;
+		c.value = 0;  // this is fix for gcc-4.8 union init bug
+		memcpy(c.bytes + (8 - len), p, len);
+		return boost::endian::big_to_native(c.value);
+	}
 
 }

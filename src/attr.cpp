@@ -57,8 +57,8 @@ std::string Attr::ViewAccess() const
 
 Attr::Attr(const string& attr)  // NOLINT
 {
-	if (attr.size() != sizeof(Attr))
-		throw std::runtime_error("the data cannot inialize attr");
+	assert(attr.size() == sizeof(Attr));
+
 	memmove(this, attr.c_str(), sizeof(Attr));
 }
 
