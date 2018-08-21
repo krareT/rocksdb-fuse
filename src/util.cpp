@@ -33,12 +33,11 @@ FileIndex::FileIndex(int64_t parentInode, std::string filename)
 
 FileIndex::FileIndex(const std::string& inializer)
 {
-	constexpr auto wide = sizeof(int64_t);
-	if (inializer.size() > wide || inializer[wide] != ':')
-		throw std::runtime_error("the is not a valid data");
-	int64_t serialized;
-	memmove(&serialized, inializer.c_str(), sizeof(int64_t));
-	parentInode = __bswap_64(serialized);
+	//file index: inode:filename
+	constexpr auto wide = sizeof(int64_t);//size of inode
+	assert(inializer.size() > wide && inializer[wide] == ':');
+	
+	parentInode = ReadBigEndian64(inializer.c_str());
 	filename = inializer.substr(sizeof(int64_t));
 }
 
@@ -49,8 +48,7 @@ std::string FileIndex::GetFilename() const
 
 std::string FileIndex::Key()const
 {
-    int64_t res = __bswap_64(inode);
-    return std::string(reinterpret_cast<char*>(&res),sizeof res);
+	return Encode(inode);
 }
 
 std::string FileIndex::Index() const
@@ -63,8 +61,12 @@ std::string FileIndex::Index() const
 
 std::string rocksfs::Encode(int64_t inode)
 {
-    auto res = __bswap_64(inode);
-    return string(reinterpret_cast<char*>(&res), sizeof (int64_t));
+	union {
+		char buf[8];
+		int64_t val;
+	}conv;
+	conv.val = boost::endian::native_to_big(inode);
+    return string(conv.buf, sizeof (int64_t));
 }
 
 bool rocksfs::StartsWith(const std::string& mainstr, const std::string& substr)

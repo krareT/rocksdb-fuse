@@ -4,104 +4,106 @@ using namespace  rocksfs;
 namespace
 {
     void *s_init(struct fuse_conn_info* conn, fuse_config* cfg) {
-        RocksFs *ctx = static_cast<RocksFs*>(fuse_get_context()->private_data);
+        FileSystemOptions *ctx = static_cast<FileSystemOptions*>(fuse_get_context()->private_data);
         ctx->Init(conn, cfg);
         return ctx;
     }
     int s_getattr(const char *path, struct stat *statbuf, fuse_file_info* fi) {
         if(!fi)
-            return static_cast<RocksFs*>(fuse_get_context()->private_data)->GetAttr(path, statbuf, fi);
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->GetAttr("", statbuf, fi);
+            return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetAttr(path, statbuf, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetAttr("", statbuf, fi);
     }
 
     int s_utimens(const char *path, const struct timespec tv[2], fuse_file_info* fi) {
         if (!fi)
-            return static_cast<RocksFs*>(fuse_get_context()->private_data)->Utimens(path, tv, fi);
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Utimens("", tv, fi);
+            return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Utimens(path, tv, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Utimens("", tv, fi);
     }
     int s_open(const char *path, struct fuse_file_info *fi) {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Open(path, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Open(path, fi);
     }
     int s_read(const char *path, char *buf, std::size_t size, off_t offset, struct fuse_file_info *fi) {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Read(buf, size, offset, fi);
+		if (!path)
+			return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Read("", buf, size, offset, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Read(path,buf, size, offset, fi);
     }
     int s_write(const char *path, const char *buf, std::size_t size, off_t offset, struct fuse_file_info *fi) {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Write(buf, size, offset, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Write(buf, size, offset, fi);
     }
     int s_release(const char *path, struct fuse_file_info *fi) {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Release(fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Release(fi);
     }
 
     int s_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi, fuse_readdir_flags flag) {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->ReadDir(buf, filler, offset, fi, flag);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->ReadDir(buf, filler, offset, fi, flag);
     }
 
     int s_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Create(path, mode, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Create(path, mode, fi);
     }
     int s_unlink(const char *path)
     {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Unlink(path);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Unlink(path);
     }
     int s_opendir(const char *path, fuse_file_info* fi)
     {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->OpenDir(path, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->OpenDir(path, fi);
     }
     int s_releasedir(const char *path, fuse_file_info* fi)
     {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->ReleaseDir(fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->ReleaseDir(fi);
     }
     int s_mkdir(const char *path, mode_t mode)
     {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->MkDir(path, mode);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->MkDir(path, mode);
     }
 
     int s_rmdir(const char* path)
     {
-        return static_cast<RocksFs*>(fuse_get_context()->private_data)->Rmdir(path);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Rmdir(path);
     }
 
 	int s_link(const char* oldpath, const char* newpath)
 	{
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Link(oldpath, newpath);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Link(oldpath, newpath);
 	}
 	int s_flush(const char* , struct fuse_file_info* fi)
     {
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Flush(fi);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Flush(fi);
     }
 	int s_chmod(const char * path, mode_t mode, struct fuse_file_info *fi)
     {
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Chmod(path, mode, fi);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Chmod(path, mode, fi);
     }
 	int s_chown(const char * path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
     {
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Chown(path, uid, gid, fi);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Chown(path, uid, gid, fi);
     }
 	int s_truncate(const char* path, off_t offset, struct fuse_file_info *fi)
 	{
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->Truncate(offset, fi);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Truncate(offset, fi);
 	}
 #ifdef HAVE_SETXATTR
 	int s_setxattr(const char *path, const char *name, const char *value, size_t size, int flags)
 	{
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->SetXattr(path, name, value, size, flags);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->SetXattr(path, name, value, size, flags);
 	}
 	int s_getxattr(const char *path, const char *name, char *value, size_t size)
 	{
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->GetXattr(path, name, value, size);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetXattr(path, name, value, size);
 	}
 	int s_listxattr(const char *path, char *list, size_t size)
 	{
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->ListXattr(path, list, size);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->ListXattr(path, list, size);
 	}
 	int s_removexattr(const char *path, const char *name)
 	{
-		return static_cast<RocksFs*>(fuse_get_context()->private_data)->RemoveXattr(path, name);
+		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->RemoveXattr(path, name);
 	}
 #endif // HAVE_SETXATTR
 }
 
-int RocksFs::Mount(int argc, char* argv[])
+int FileSystemOptionsBase::Mount(int argc, char* argv[])
 {
     fuse_operations res{};
     res.init = s_init;

@@ -73,10 +73,10 @@ int main(int argc, char* argv[])
 		}
 	}
 	fuse_opt_add_arg(&args, "-oauto_unmount");
-	fuse_opt_add_arg(&args,("-f"));
+	fuse_opt_add_arg(&args,"-f");
 	ChangeToDaemon();
 	
-	rocksfs::RocksFs fs(config.dbpath);
+	rocksfs::FileSystemOptions fs(config.dbpath);
 	fs.Mount(args.argc, args.argv);
 	return 0;
 }
