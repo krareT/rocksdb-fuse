@@ -10,7 +10,7 @@ struct Attr final
 	Attr() = default;
 
 	timespec atime, mtime, ctime;
-	int64_t size;
+	size_t size;
 	int64_t nlink;
 	int64_t inode;
 	uid_t uid;

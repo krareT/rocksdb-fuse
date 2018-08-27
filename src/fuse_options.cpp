@@ -11,6 +11,7 @@
 #include <mutex>
 #include <fcntl.h>
 #include <cerrno>
+#include <memory.h>
 #ifdef HAVE_SETXATTR
 #include <attr/xattr.h>
 #endif // HAVE_SETXATTR
@@ -21,6 +22,8 @@
 using namespace rocksdb;
 using namespace rocksfs;
 using namespace std;
+using boost::endian::native_to_big;
+using boost::endian::big_to_native;
 namespace fs = std::experimental::filesystem;
 
 
@@ -39,14 +42,14 @@ using Txn = std::unique_ptr<rocksdb::Transaction>;
 
 namespace
 {
-	const int64_t kPageSize = 4096;
+	const size_t kPageSize = 4096;
 	const string kMaxEncodedIdx = Encode(std::numeric_limits<int64_t>::max());//大端表示的int64_t最大值
 	struct Locker
 	{
 		void Open(int64_t inode);
 		bool Release(int64_t inode);
 		bool IsOpening(int64_t inode);
-		std::map<int64_t, int> map;
+		std::map<int64_t, int> map{};
 		std::mutex mtx;
 	}opening_files;
 
@@ -59,7 +62,31 @@ namespace
 	{
 		return encoded_inode + Encode(offset / kPageSize);
 	}
+	bool Accessible(const Attr& attr, const unsigned mask)
+	{
+		const auto uid = fuse_get_context()->uid;
+		const auto gid = fuse_get_context()->gid;
+		if (uid == 0)
+			return true;
+		unsigned flag;
 
+		if (uid == attr.uid)
+			flag = (attr.mode >> 6) & 7; //rwx------
+		else if (gid == attr.gid)//同上
+			flag = (attr.mode >> 3) & 7;//---rwx---	
+		else
+			flag = (attr.mode >> 0) & 7;//------rwx
+		auto accessible = true;
+
+		if (mask & R_OK)
+			accessible = accessible && (flag & R_OK);
+		if (mask & W_OK)
+			accessible = accessible && (flag & W_OK);
+		if (mask & X_OK)
+			accessible = accessible && (flag & X_OK);
+
+		return accessible;
+	}
 }
 
 bool Locker::IsOpening(int64_t inode)
@@ -110,7 +137,19 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 
 	rocksdb::TransactionDB* dbPtr = nullptr;
 	std::vector<ColumnFamilyHandle*> handles;
-	Status s = TransactionDB::Open(options, TransactionDBOptions(), path, descriptors, &handles, &dbPtr);
+	string path_actual(path);
+	if(!path.empty() && path[0] == '~')
+	{
+		string home = getenv("HOME");
+		if(home.empty())
+		{
+			puts("get home path fail");
+			exit(1);
+		}
+		path_actual.replace(0,1,home);
+	}
+
+	Status s = TransactionDB::Open(options, TransactionDBOptions(), path_actual, descriptors, &handles, &dbPtr);
 
 	if (!s.ok())
 	{
@@ -167,6 +206,23 @@ void* FileSystemOptions::Init(fuse_conn_info* conn, fuse_config *cfg)
 	return nullptr;
 }
 
+int rocksfs::FileSystemOptions::Access(const std::string& path, int mask)
+{
+	auto idx = GetIndex(path);
+	if (idx.Bad())
+		return static_cast<int>(idx.inode);
+	string slice;
+	Status s = db->Get(ReadOptions(), hAttr, idx.Key(),&slice);
+	CheckStatus(s);
+	Attr attr{};
+	if (!Attr::Decode(slice, &attr))
+		return -EIO;
+	if (Accessible(attr, mask))
+		return 0;
+	return -EACCES;
+
+}
+
 int FileSystemOptions::GetAttr(const std::string& path, struct stat* stbuf, fuse_file_info* fi)
 {
 
@@ -197,7 +253,7 @@ int FileSystemOptions::GetAttr(const std::string& path, struct stat* stbuf, fuse
 
 int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, fuse_file_info* fi, enum fuse_readdir_flags flags)
 {
-	string encoded_inode = Encode(fi->fh);
+	const string encoded_inode = Encode(fi->fh);
 
 	string encodedAttr;
 	Status s = db->Get(ReadOptions(), hAttr, encoded_inode, &encodedAttr);
@@ -217,18 +273,20 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 
 	for (itor->Seek(encoded_inode);itor->Valid() && itor->key().starts_with(encoded_inode);itor->Next())
 	{
-		constexpr auto offst = sizeof(uint64_t) + 1;
+		if (itor->key() == Encode(0))
+			continue;
+		constexpr auto substr_offset = sizeof(uint64_t) + 1;
         
-        const string filename = itor->key().ToString().substr(offst);
-		string attrStr;
+        const string filename = itor->key().ToString().substr(substr_offset);
+		string attr_str;
         const string fileinode = itor->value().ToString();
-		s = db->Get(ReadOptions(), hAttr, fileinode, &attrStr);
+		s = db->Get(ReadOptions(), hAttr, fileinode, &attr_str);
 		
-		Attr fileattr{};
+		Attr file_attr{};
 		struct stat stbuf {};
-		if(s.ok() && Attr::Decode(attrStr, &fileattr))
+		if(s.ok() && Attr::Decode(attr_str, &file_attr))
 		{
-			fileattr.Fill(&stbuf);
+			file_attr.Fill(&stbuf);
 			filler(buf, filename.data(), &stbuf, 0, zero);
 		}
 		else
@@ -238,31 +296,7 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 	}
 	return 0;
 }
-bool Accessable(const Attr& attr, const unsigned mask)
-{
-	const auto euid = fuse_get_context()->uid;
-	const auto egid = fuse_get_context()->gid;
-	if (euid == 0)
-		return true;
-	unsigned flag;
 
-	if (euid == attr.uid)
-		flag = (attr.mode >> 6) & 7; //rwx------
-	else if (egid == attr.gid)//同上
-		flag = (attr.mode >> 3) & 7;//---rwx---	
-	else
-		flag = (attr.mode >> 0) & 7;//------rwx
-	bool accessable = true;
-
-	if (mask & R_OK)
-		accessable = accessable && (flag & R_OK);
-	if (mask & W_OK)
-		accessable = accessable && (flag & W_OK);
-	if (mask & X_OK)
-		accessable = accessable && (flag & X_OK);
-
-	return accessable;
-}
 int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 {
 	auto index = GetIndex(path);
@@ -290,9 +324,9 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 	default: {}
 	}
 
-	if (!Accessable(attr, open_flags))
+	if (!Accessible(attr, open_flags))
 		return -EACCES;
-	if (fi->flags & O_APPEND)
+	if (S_ISFIFO(attr.mode))
 		fi->nonseekable = true;
 	
 
@@ -303,7 +337,7 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 		attr.mtime = attr.ctime = Now();
 		txn->Put(hAttr, index.Key(), attr.Encode());
 		
-		//TODO truncate的优化
+		//TODO truncate 的优化
 		unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
 		
 		//truncate
@@ -321,7 +355,7 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 	return 0;
 }
 
-int FileSystemOptions::Read(const std::string& path,char* buf, size_t size, off_t offset, fuse_file_info* fi)
+int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info* fi)
 {
 	if (!fi)
 		return -EIO;
@@ -331,7 +365,7 @@ int FileSystemOptions::Read(const std::string& path,char* buf, size_t size, off_
 	Txn txn{ db->BeginTransaction(WriteOptions()) };
 
 	string attr_buf, data;
-	//锁文件,准备iterator
+	//锁文件,准备 iterator
 	Status s = txn->GetForUpdate(ReadOptions(), hAttr, Encode(fi->fh), &attr_buf);
 
 
@@ -343,13 +377,43 @@ int FileSystemOptions::Read(const std::string& path,char* buf, size_t size, off_
 	if (offset >= attr.size)
 		return 0;
 
+	if (S_ISFIFO(attr.mode)) // for FIFO
+	{
+		size =  std::min(size, attr.size);
+		const auto read_size = size;
 
-	//TODO 可能的优化，考虑加入iterator_lower_bound和iterator_upper_bound
+		std::unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
+		itor->Seek(encoded_inode);
+		while (size > 0 &&itor->key().starts_with(encoded_inode))
+		{
+			const auto read_bytes = std::min(itor->value().size(),size);
+			memcpy(buf, itor->value().data(), read_bytes);
+			buf += read_bytes;
+			size -= read_bytes;
+			if (read_bytes == itor->value().size())
+			{
+				txn->Delete(itor->key());
+			}
+			else
+			{
+				Slice data(itor->value());
+				data.remove_prefix(read_bytes);
+				txn->Put(itor->key(), data);
+			}
+			itor->Next();
+		}
+		attr.size -= read_size;
+		txn->Put(hAttr, encoded_inode, attr.Encode());
+		if (!txn->Commit().ok())
+			return -EIO;
+		return read_size;
+	}
+	//TODO 可能的优化，考虑加入 iterator_lower_bound和 iterator_upper_bound
 	std::unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
 	txn->UndoGetForUpdate(hAttr, Encode(fi->fh));
 	//解锁
 
-	//将size重置到可读范围
+	//将 size 重置到可读范围
 	const off_t file_size = attr.size;
 	if (offset < file_size && offset + static_cast<off_t>(size) > file_size)
 		size = file_size - offset;
@@ -534,6 +598,7 @@ int FileSystemOptions::Release(struct fuse_file_info* fi)
     return -EIO;
 }
 //TODO 检查readonly方式打开的文件能不能写。
+//TODO 尝试对于连续零的空洞block进行优化。
 int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, struct fuse_file_info *fi)
 {
 
@@ -542,17 +607,28 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 		return -EIO;
 	const string encoded_inode = Encode(fi->fh);
 	Txn txn{ db->BeginTransaction(WriteOptions()) };
-	string data_buf, arrt_buf;
-	Status s = txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &arrt_buf);
+	string data_buf, attr_buf;
+	Status s = txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &attr_buf);
 	CheckStatus(s);
 
 	Attr attr{};
-	if (!Attr::Decode(arrt_buf, &attr))
+	if (!Attr::Decode(attr_buf, &attr))
 	{
 		return -EIO;
 	}
-
-	//TODO 检查一下这里的flags是否会被填充。
+	if (S_ISFIFO(attr.mode))
+	{
+		std::unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
+		itor->SeekForPrev(encoded_inode + kMaxEncodedIdx);
+		auto index = ReadBigEndian64(itor->key().data() + sizeof(int64_t));
+		index += 1;
+		txn->Put(hData, encoded_inode + Encode(index), Slice(buf, size));
+		attr.size += size;
+		txn->Put(hAttr, encoded_inode, attr.Encode());
+		if (!txn->Commit().ok())
+			return -EIO;
+	}
+	// TODO 检查一下这里的flags是否会被填充。
 	if (fi->flags & O_APPEND)
 		offset = attr.size;
 	// page_start  write_start           write_end        page_end
@@ -596,7 +672,7 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 			return -EIO;
 		}
 		//数据写入块
-		assert(data_block.size() >= static_cast<size_t>(write_end));
+		assert(data_block.size() >= write_end);
 		data_block.replace(write_start, block_write_bytes, buf);
 		txn->Put(hData, block_index, data_block);
 		buf += block_write_bytes;
@@ -682,7 +758,7 @@ int rocksfs::FileSystemOptions::OpenDir(const std::string& path, fuse_file_info*
         return -EIO;
     }
    
-    if (!Accessable(attr, R_OK))
+    if (!Accessible(attr, R_OK))
         return -EACCES;
 
     return 0;
@@ -720,7 +796,7 @@ int FileSystemOptions::Utimens(const std::string& path, const timespec tv[2], fu
     if (tv && tv[0].tv_nsec == UTIME_OMIT && tv[1].tv_nsec == UTIME_OMIT)//不修改
         return 0;
     //写权限检查
-    if (!Accessable(attr, W_OK))
+    if (!Accessible(attr, W_OK))
         return -EPERM;
 
     if(!tv)
@@ -792,28 +868,28 @@ int FileSystemOptions::Rmdir(const std::string& path)
         return -EPERM;
 
     fs::path full_path(path);
-    auto fidx = GetIndex(path);
-    if (fidx.Bad())
+    auto file_index = GetIndex(path);
+    if (file_index.Bad())
         return -ENOENT;
     Txn txn{ db->BeginTransaction(WriteOptions()) };
     string parAttrBuf;
 
-    txn->GetForUpdate(ReadOptions(), hAttr, Encode(fidx.parentInode), &parAttrBuf);//锁
+    txn->GetForUpdate(ReadOptions(), hAttr, Encode(file_index.parentInode), &parAttrBuf);//锁
     Attr parAttr{};
     Attr::Decode(parAttrBuf, &parAttr);
-    if (!Accessable(parAttr , W_OK | X_OK))
+    if (!Accessible(parAttr , W_OK | X_OK))
         return -EPERM;
     string ignore;
-    txn->GetForUpdate(ReadOptions(), hIndex, fidx.Index(), &ignore);//锁
+    txn->GetForUpdate(ReadOptions(), hIndex, file_index.Index(), &ignore);//锁
     
     unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(),hIndex));
-    itor->Seek(fidx.Key());//以本目录inode开始的文件一定是目录下的文件
-    if (itor->Valid() && itor->key().starts_with(fidx.Key()))//目录不空
+    itor->Seek(file_index.Key());//以本目录inode开始的文件一定是目录下的文件
+    if (itor->Valid() && itor->key().starts_with(file_index.Key()))//目录不空
         return -ENOTEMPTY;
     parAttr.mtime = parAttr.ctime = Now();
-    txn->Delete(hIndex, fidx.Index());
-    txn->Delete(hAttr, fidx.Key());
-    txn->Put(hAttr, Encode(fidx.parentInode), parAttr.Encode());
+    txn->Delete(hIndex, file_index.Index());
+    txn->Delete(hAttr, file_index.Key());
+    txn->Put(hAttr, Encode(file_index.parentInode), parAttr.Encode());
     if (!txn->Commit().ok())
         return -EIO;
     return 0;
@@ -863,13 +939,13 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 	CheckStatus(s);
 	Attr src_par_attr{}, dest_par_attr{};
 	Attr::Decode(src_par_attr_buf, &src_par_attr);
-	if (!Accessable(src_par_attr, W_OK | X_OK))
+	if (!Accessible(src_par_attr, W_OK | X_OK))
 		return -EACCES;
 
 	s = txn->GetForUpdate(ReadOptions(), hAttr, dest_par_idx.Key(), &dest_par_attr_buf);
 	CheckStatus(s);
 	Attr::Decode(dest_par_attr_buf, &dest_par_attr);
-	if (!Accessable(dest_par_attr, W_OK | X_OK))
+	if (!Accessible(dest_par_attr, W_OK | X_OK))
 		return -EACCES;
 	
 
@@ -993,7 +1069,7 @@ int rocksfs::FileSystemOptions::Truncate(off_t offset, fuse_file_info * fi)
 	const auto encoded_inode = Encode(fi->fh);
 	string attr_buf;
 	txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &attr_buf);
-	Attr attr;
+	Attr attr{};
 	const bool state = Attr::Decode(attr_buf, &attr);
 	assert(state);
 	if (offset < attr.size)//扩容不用管。
@@ -1138,7 +1214,7 @@ int FileSystemOptions::Chmod(const std::string& path, mode_t mode, fuse_file_inf
 		txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &attr_buf);
 	}
 	//TODO for symlnk
-	Attr attr;
+	Attr attr{};
 	if (!Attr::Decode(attr_buf, &attr))
 		return -EIO;
 	
@@ -1172,18 +1248,134 @@ int rocksfs::FileSystemOptions::Chown(const std::string& path, uid_t uid, gid_t 
 		txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &attr_buf);
 	}
 	//TODO for symlnk
-	Attr attr;
+	Attr attr{};
 	if (!Attr::Decode(attr_buf, &attr))
 		return -EIO;
 	if (fuse_get_context()->gid != 0 && attr.uid != fuse_get_context()->gid)
 		return -EPERM;
-
-	attr.uid = (uid == static_cast<uid_t>(-1) ? attr.uid : uid);
-	attr.gid = (gid == static_cast<uid_t>(-1) ? attr.gid : gid);
+	const auto kNotChange = static_cast<uid_t>(-1);
+	attr.uid = (uid == kNotChange ? attr.uid : uid);
+	attr.gid = (gid == kNotChange ? attr.gid : gid);
 	attr.ctime = Now();
 	txn->Put(hAttr, encoded_inode, attr.Encode());
 	if (!txn->Commit().ok())
 		return -EIO;
+	return 0;
+}
+int rocksfs::FileSystemOptions::SymLink(const std::string& target, const std::string& linkpath)
+{
+	Txn txn(db->BeginTransaction(WriteOptions()));
+	string buf;
+
+	auto fidx = GetIndexAndLock(linkpath, txn);
+	if(!fidx.Bad())
+		return -EEXIST;
+	if (fidx.inode != -ENOENT)
+		return static_cast<int>(fidx.inode);
+	Status s = txn->GetForUpdate(ReadOptions(), hAttr, Encode(fidx.parentInode), &buf);
+	assert(s.ok());
+	Attr parent_attr{};
+	const bool decode_ok = Attr::Decode(buf, &parent_attr);
+	assert(decode_ok);
+
+	auto link_attr = Attr::CreateNormal();
+	fidx.inode = inodeCounter++;
+	link_attr.inode = fidx.inode;
+	link_attr.mode = S_IFLNK | 777;
+	link_attr.size = target.size();
+	parent_attr.ctime = Now();
+	
+	txn->Put(hAttr, Encode(fidx.parentInode), parent_attr.Encode());//写入父目录属性
+	txn->Put(hIndex, fidx.Index(), fidx.Key());//写入文件
+	txn->Put(hData, fidx.Key(), target);//target name
+	txn->Put(hAttr, fidx.Key(), link_attr.Encode());
+	if (!txn->Commit().ok())
+		return -EIO;
+	
+
+	return 0;
+}
+int rocksfs::FileSystemOptions::ReadLink(const std::string& filepath, char* buf, size_t size)
+{
+	auto file_index = GetIndex(filepath);
+	if (file_index.Bad())
+		return static_cast<int>(file_index.inode);
+	string target_name, attr_buf;
+	Status s = db->Get(ReadOptions(), hAttr, file_index.Key(), &attr_buf);
+	CheckStatus(s);
+	Attr attr{};
+	const bool decode_ok = Attr::Decode(attr_buf, &attr);
+	assert(decode_ok);
+	if (!(attr.mode & S_IFLNK))
+		return -EINVAL;
+
+
+	s = db->Get(ReadOptions(), hData, file_index.Key(), &target_name);
+	CheckStatus(s);
+	memcpy(buf, target_name.c_str(), std::min(size, target_name.size()));
+	if (target_name.size() + 1 > size)
+		return -ENAMETOOLONG;
+	buf[target_name.size()] = '\0';
+	return 0;
+	//TODO 检测是否返回target_name.size()
+}
+int rocksfs::FileSystemOptions::Mknod(const std::string& path, mode_t mode, dev_t dev)
+{
+
+	if (S_ISCHR(mode)||S_ISBLK(mode))//不支持字符设备和块设备
+		return -ENOTSUP;
+
+	if (path == "/")
+		return -EEXIST;
+
+
+	Txn txn{ db->BeginTransaction(WriteOptions()) };
+	auto parentIdx = GetIndexAndLock(fs::path(path).parent_path().generic_string(), txn);
+	//父目录不存在
+	if (parentIdx.Bad())
+		return static_cast<int>(parentIdx.inode);//errno
+
+	auto file_index = FileIndex(parentIdx.inode, fs::path(path).filename().generic_string());
+
+	string par_attr_buf;
+	Status s = txn->GetForUpdate(ReadOptions(), hAttr, parentIdx.Key(), &par_attr_buf);
+	CheckStatus(s);
+	string ignore;
+	s = txn->GetForUpdate(ReadOptions(), hIndex, file_index.Index(), &ignore);
+	if (s.ok())//文件存在是否需要检测权限?
+	{
+		//Trunc file
+		db->DeleteRange(WriteOptions(), hData, file_index.Index(), file_index.Index() + kMaxEncodedIdx);
+	}
+	else if (!s.IsNotFound())
+		return -EIO;
+
+	string parAttrBuf;
+	txn->GetForUpdate(ReadOptions(), hAttr, parentIdx.Key(), &parAttrBuf);
+	Attr parAttr{};
+	if (!Attr::Decode(parAttrBuf, &parAttr))
+	{
+		return -EIO;
+	}
+
+	auto attr = Attr::CreateNormal();
+	if (s.IsNotFound())
+	{
+		file_index.inode = inodeCounter++;
+	}
+
+	parAttr.atime = parAttr.ctime = Now();
+	attr.mode = mode;
+	attr.inode = file_index.inode;
+	txn->Put(hIndex, file_index.Index(), file_index.Key());
+	txn->Put(hAttr, file_index.Key(), attr.Encode());
+	txn->Put(hAttr, parentIdx.Key(), parAttr.Encode());
+
+
+	if (!txn->Commit().ok())
+		return -EIO;
+
+
 	return 0;
 }
 #ifdef HAVE_SETXATTR
@@ -1191,7 +1383,7 @@ int rocksfs::FileSystemOptions::Chown(const std::string& path, uid_t uid, gid_t 
 int rocksfs::FileSystemOptions::SetXattr(const std::string& path, const std::string& name, const void* value, size_t size, int flags)
 {
 
-	Txn txn;
+	Txn txn(db->BeginTransaction(WriteOptions()));
 	auto fidx = GetIndexAndLock(path, txn);
 	if (fidx.Bad())
 		return fidx.inode;
@@ -1248,7 +1440,7 @@ int rocksfs::FileSystemOptions::RemoveXattr(const std::string& path, const std::
 		return idx.inode;
 	unique_ptr<Iterator> itor(db->NewIterator(ReadOptions(), hAttr));
 	PinnableSlice slice;
-	Txn txn;
+	Txn txn(db->BeginTransaction(WriteOptions()));
 	Status s = txn->GetForUpdate(ReadOptions(), hAttr, idx.Key() + name, &slice);
 	if (s.IsNotFound())
 		return -ENOATTR;
@@ -1260,3 +1452,83 @@ int rocksfs::FileSystemOptions::RemoveXattr(const std::string& path, const std::
 
 
 
+#include <string>
+#include <experimental/filesystem>
+#include <rocksdb/utilities/transaction_db.h>
+#include "fuse_options.hpp"
+#include "util.hpp"
+
+using namespace rocksdb;
+using namespace rocksfs;
+using namespace std;
+namespace fs = std::experimental::filesystem;
+
+FileIndex FileSystemOptions::GetIndex(const std::string& path) const
+{
+	if (path == "/")
+	{
+		FileIndex res(0, "/");
+		res.inode = 0;
+		return res;
+	}
+	FileIndex idx(0, "/");
+	idx.inode = 0;
+	auto file_path = fs::path(path);
+	for (auto itor = ++file_path.begin(); itor != file_path.end(); ++itor)
+	{
+		idx.filename = itor->generic_string();
+		idx.parentInode = idx.inode;
+		string encodedIdx;
+		const string tmp = idx.Index();
+		Status s = db->Get(ReadOptions(), hIndex, tmp, &encodedIdx);
+		if (!s.ok())
+		{
+			idx.filename.clear();
+			if (s.IsNotFound())
+				idx.inode = -ENOENT;
+			else
+				idx.inode = -EIO;
+			return idx;
+		}
+
+		idx.inode = ReadBigEndian64(encodedIdx.c_str());
+	}
+	return idx;
+}
+
+FileIndex FileSystemOptions::GetIndexAndLock(const std::string & path, std::unique_ptr<rocksdb::Transaction>& txn) const
+{
+	if (path == "/")
+	{
+		FileIndex res(0, "/");
+		res.inode = 0;
+		return res;
+	}
+	fs::path file_path(path);
+	auto parentIdx = GetIndex(file_path.parent_path().generic_string());
+	if (parentIdx.Bad())
+	{
+		FileIndex res{ 0,"" };
+		res.inode = parentIdx.inode;
+		return res;
+	}
+	string encoded_idx;
+	const auto filename = file_path.filename();
+
+
+	FileIndex res{ parentIdx.inode,file_path.filename().generic_string() };
+	const auto idx = res.Index();
+	Status s = txn->GetForUpdate(ReadOptions(), hIndex, idx, &encoded_idx);
+	if (!s.ok())
+	{
+		if (s.IsNotFound())
+			res.inode = -ENOENT;
+		else if (s.IsDeadlock())
+			res.inode = -EBUSY;
+		else
+			res.inode = -EIO;
+		return res;
+	}
+	res.inode = ReadBigEndian64(encoded_idx.c_str());
+	return res;
+}
