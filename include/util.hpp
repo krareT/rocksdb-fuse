@@ -21,7 +21,7 @@ namespace rocksfs
 		int64_t parentInode;
 		int64_t inode = -1;//negative for errno
 		std::string filename;
-		bool Bad()const { return filename.empty(); }
+		bool Bad()const { return inode < 0; }
 	};
 
 	std::string Encode(int64_t inode);

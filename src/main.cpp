@@ -1,5 +1,4 @@
 ﻿#include <unistd.h>
-#include <rocksdb/slice.h>
 #include "fuse_options.hpp"
 using namespace std;
 using namespace rocksfs;
@@ -15,7 +14,7 @@ struct myfs_opts {
 	int is_help;
 }myfs_opts;
 
-#define MYFS_OPT(t,p,v){t,offsetof(struct myfs_opts,p),v}
+#define MYFS_OPT(t,p){t,offsetof(struct myfs_opts,p),1}
 
 static const char *usage =
 "Usage: ./rocksdb-fuse [options] <mountpoint>\n\n"
@@ -27,7 +26,7 @@ static const char *usage =
 "\n";
 
 static const struct fuse_opt option_spec[] = {
-	MYFS_OPT("--dbpath=%s",dbpath,0),
+	MYFS_OPT("--dbpath=%s",dbpath),
 	FUSE_OPT_KEY("-h",		0),
 	FUSE_OPT_KEY("--help",		0),
 	FUSE_OPT_END

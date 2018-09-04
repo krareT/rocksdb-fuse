@@ -126,7 +126,7 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 {
 	std::vector<ColumnFamilyDescriptor> descriptors;
 	descriptors.emplace_back(ColumnFamilyDescriptor(kDefaultColumnFamilyName, ColumnFamilyOptions()));
-	descriptors.emplace_back(ColumnFamilyDescriptor("Data", ColumnFamilyOptions()));
+	//descriptors.emplace_back(ColumnFamilyDescriptor("Data", ColumnFamilyOptions()));
 	descriptors.emplace_back(ColumnFamilyDescriptor("Index", ColumnFamilyOptions()));
 	descriptors.emplace_back(ColumnFamilyDescriptor("Attr", ColumnFamilyOptions()));
 	descriptors.emplace_back(ColumnFamilyDescriptor("DeletedFile", ColumnFamilyOptions()));
@@ -151,17 +151,17 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 
 	Status s = TransactionDB::Open(options, TransactionDBOptions(), path_actual, descriptors, &handles, &dbPtr);
 
+	
 	if (!s.ok())
 	{
         delete dbPtr;
 		printf("open database error at %s\nerror:%s", path.c_str(), s.getState());
 		exit(0);
 	}
-	dbPtr->DestroyColumnFamilyHandle(handles[0]);
-	hData = handles[1];
-	hIndex = handles[2];
-	hAttr = handles[3];
-	hDeleted = handles[4];
+	hData = handles[0];
+	hIndex = handles[1];
+	hAttr = handles[2];
+	hDeleted = handles[3];
 	db = dbPtr;
 	unique_ptr<Iterator> itor(db->NewIterator(ReadOptions(), hAttr));
 	itor->SeekToLast();
@@ -194,6 +194,7 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 		db->Delete(WriteOptions(),hAttr, itor->key());
 		db->Delete(WriteOptions(),hDeleted, itor->key());
 	}
+
 }
 
 void* FileSystemOptions::Init(fuse_conn_info* conn, fuse_config *cfg)
@@ -275,9 +276,9 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 	{
 		if (itor->key() == Encode(0))
 			continue;
-		constexpr auto substr_offset = sizeof(uint64_t) + 1;
+		constexpr auto filename_offset = sizeof(uint64_t) + 1;
         
-        const string filename = itor->key().ToString().substr(substr_offset);
+        const string filename = itor->key().ToString().substr(filename_offset);
 		string attr_str;
         const string fileinode = itor->value().ToString();
 		s = db->Get(ReadOptions(), hAttr, fileinode, &attr_str);
@@ -326,8 +327,7 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 
 	if (!Accessible(attr, open_flags))
 		return -EACCES;
-	if (S_ISFIFO(attr.mode))
-		fi->nonseekable = true;
+
 	
 
 	if ((fi->flags&O_ACCMODE) == O_WRONLY && !(fi->flags & O_APPEND))//如果不是追加(清零写)则需要修改文件属性
@@ -377,37 +377,7 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
 	if (offset >= attr.size)
 		return 0;
 
-	if (S_ISFIFO(attr.mode)) // for FIFO
-	{
-		size =  std::min(size, attr.size);
-		const auto read_size = size;
-
-		std::unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
-		itor->Seek(encoded_inode);
-		while (size > 0 &&itor->key().starts_with(encoded_inode))
-		{
-			const auto read_bytes = std::min(itor->value().size(),size);
-			memcpy(buf, itor->value().data(), read_bytes);
-			buf += read_bytes;
-			size -= read_bytes;
-			if (read_bytes == itor->value().size())
-			{
-				txn->Delete(itor->key());
-			}
-			else
-			{
-				Slice data(itor->value());
-				data.remove_prefix(read_bytes);
-				txn->Put(itor->key(), data);
-			}
-			itor->Next();
-		}
-		attr.size -= read_size;
-		txn->Put(hAttr, encoded_inode, attr.Encode());
-		if (!txn->Commit().ok())
-			return -EIO;
-		return read_size;
-	}
+	
 	//TODO 可能的优化，考虑加入 iterator_lower_bound和 iterator_upper_bound
 	std::unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
 	txn->UndoGetForUpdate(hAttr, Encode(fi->fh));
@@ -445,7 +415,7 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
 					//      |-----size-----|
 					//   read_start     read_end
 					//      |--read_bytes--|
-					memcpy(buf, slice.data() + offset % kPageSize, size);
+					memcpy(buf, slice.data() + offset % kPageSize, read_bytes);
 					offset += read_bytes;
 					buf += read_bytes;
 					size -= read_bytes;
@@ -616,18 +586,7 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 	{
 		return -EIO;
 	}
-	if (S_ISFIFO(attr.mode))
-	{
-		std::unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
-		itor->SeekForPrev(encoded_inode + kMaxEncodedIdx);
-		auto index = ReadBigEndian64(itor->key().data() + sizeof(int64_t));
-		index += 1;
-		txn->Put(hData, encoded_inode + Encode(index), Slice(buf, size));
-		attr.size += size;
-		txn->Put(hAttr, encoded_inode, attr.Encode());
-		if (!txn->Commit().ok())
-			return -EIO;
-	}
+	
 	// TODO 检查一下这里的flags是否会被填充。
 	if (fi->flags & O_APPEND)
 		offset = attr.size;
@@ -645,8 +604,8 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 		auto block_index = PageIndex(fi->fh, offset);
 		Status s = txn->GetForUpdate(ReadOptions(), hData, block_index, &data_block);
 	
-		const auto write_start = offset % kPageSize;
-		const auto write_end = std::min<size_t>(write_start + size, kPageSize);
+		const size_t write_start = offset % kPageSize;
+		const auto write_end = std::min(write_start + size, kPageSize);
 		const auto block_write_bytes = write_end - write_start;
 		assert(block_write_bytes > 0 && block_write_bytes <= kPageSize);
 		if (s.ok())//有这个块
@@ -673,14 +632,14 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 		}
 		//数据写入块
 		assert(data_block.size() >= write_end);
-		data_block.replace(write_start, block_write_bytes, buf);
+		data_block.replace(write_start, block_write_bytes, buf,block_write_bytes);
 		txn->Put(hData, block_index, data_block);
 		buf += block_write_bytes;
 		size -= block_write_bytes;
 		offset += block_write_bytes;
 	}
 
-	attr.size = attr.size > offset ? attr.size : offset;//此时offset = offset(original) + size(original)
+	attr.size = std::max<size_t>(attr.size, offset);//此时offset = offset(original) + size(original)
 	attr.mtime = Now();
 
 	txn->Put(hAttr, encoded_inode, attr.Encode());
