@@ -8,6 +8,10 @@ namespace
         ctx->Init(conn, cfg);
         return ctx;
     }
+    int s_rename(const char *oldpath, const char *newpath, unsigned int flags)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Rename(oldpath,newpath,flags);
+    }
     int s_getattr(const char *path, struct stat *statbuf, fuse_file_info* fi) {
         if(!fi)
             return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetAttr(path, statbuf, fi);
@@ -121,6 +125,7 @@ int FileSystemOptions::Mount(int argc, char* argv[])
 {
     fuse_operations res{};
     res.init = s_init;
+    res.rename = s_rename;
     res.getattr = s_getattr;
     res.readdir = s_readdir;
     res.open = s_open;

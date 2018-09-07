@@ -846,6 +846,7 @@ int FileSystemOptions::Rmdir(const std::string& path)
     if (itor->Valid() && itor->key().starts_with(file_index.Key()))//目录不空
         return -ENOTEMPTY;
     parAttr.mtime = parAttr.ctime = Now();
+	parAttr.nlink -= 1;
     txn->Delete(hIndex, file_index.Index());
     txn->Delete(hAttr, file_index.Key());
     txn->Put(hAttr, Encode(file_index.parentInode), parAttr.Encode());
