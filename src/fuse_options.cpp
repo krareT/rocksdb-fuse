@@ -756,7 +756,7 @@ int FileSystemOptions::Utimens(const std::string& path, const timespec tv[2], fu
         return 0;
     //写权限检查
     if (!Accessible(attr, W_OK))
-        return -EPERM;
+        return -EACCES;
 
     if(!tv)
     {
@@ -837,7 +837,8 @@ int FileSystemOptions::Rmdir(const std::string& path)
     Attr parAttr{};
     Attr::Decode(parAttrBuf, &parAttr);
     if (!Accessible(parAttr , W_OK | X_OK))
-        return -EPERM;
+        return -EACCES;
+	//TODO 黏着位
     string ignore;
     txn->GetForUpdate(ReadOptions(), hIndex, file_index.Index(), &ignore);//锁
     
@@ -846,6 +847,7 @@ int FileSystemOptions::Rmdir(const std::string& path)
     if (itor->Valid() && itor->key().starts_with(file_index.Key()))//目录不空
         return -ENOTEMPTY;
     parAttr.mtime = parAttr.ctime = Now();
+	parAttr.nlink -= 1;
     txn->Delete(hIndex, file_index.Index());
     txn->Delete(hAttr, file_index.Key());
     txn->Put(hAttr, Encode(file_index.parentInode), parAttr.Encode());

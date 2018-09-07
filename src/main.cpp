@@ -73,34 +73,10 @@ int main(int argc, char* argv[])
 	}
 	fuse_opt_add_arg(&args, "-oauto_unmount");
 	fuse_opt_add_arg(&args,"-f");
-	ChangeToDaemon();
+	//ChangeToDaemon();
 	
 	rocksfs::FileSystemOptions fs(config.dbpath);
+	daemon(1,0);
 	fs.Mount(args.argc, args.argv);
 	return 0;
-}
-
-void ChangeToDaemon()
-{
-	auto pid = fork();
-	switch (pid)
-	{
-	case -1:puts("fork error."); exit(1);
-	case 0:break;
-	default:exit(0);
-	}
-	if (setsid() == -1)
-	{
-		puts("setsid error.\n");
-		exit(1);
-	}
-	pid = fork();
-	switch (pid)
-	{
-	case -1:puts("fork error."); exit(1);
-	case 0:break;
-	default:exit(0);
-	}
-	chdir("/");
-	umask(0);
 }
