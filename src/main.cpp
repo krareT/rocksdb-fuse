@@ -48,7 +48,7 @@ static int process_arg(void* data, const char* arg, int key, struct fuse_args* o
 		return 1;
 	}
 }
-void ChangeToDaemon();
+
 int main(int argc, char* argv[])
 {
 	struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
@@ -73,8 +73,7 @@ int main(int argc, char* argv[])
 	}
 	fuse_opt_add_arg(&args, "-oauto_unmount");
 	fuse_opt_add_arg(&args,"-f");
-	//ChangeToDaemon();
-	
+
 	rocksfs::FileSystemOptions fs(config.dbpath);
 	daemon(1,0);
 	fs.Mount(args.argc, args.argv);

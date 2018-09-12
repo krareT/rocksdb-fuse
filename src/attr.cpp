@@ -92,7 +92,7 @@ Attr Attr::CreateDir(uint64_t inode)
 
 bool Attr::Decode(const std::string& buf, Attr* attr)
 {
-    if(buf.size()!=sizeof(Attr))
+    if (buf.size() != sizeof(Attr))
         return false;
 
     memmove(attr, buf.data(), sizeof(Attr));

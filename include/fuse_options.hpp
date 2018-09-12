@@ -13,7 +13,7 @@ namespace rocksfs
 	{
 		int Mount(int argc, char* argv[]);
 		virtual ~FileSystemOptions();
-	
+
 		FileSystemOptions(const std::string& path);
 		virtual void* Init(fuse_conn_info* conn, fuse_config* cfg);
 		virtual int Access(const std::string& path, int mask);
@@ -56,6 +56,3 @@ namespace rocksfs
 		FileIndex GetIndexAndLock(const std::string& path, std::unique_ptr<rocksdb::Transaction>& txn) const;
 	};
 }
-
-
-

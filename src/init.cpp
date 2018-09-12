@@ -13,7 +13,7 @@ namespace
         return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Rename(oldpath,newpath,flags);
     }
     int s_getattr(const char *path, struct stat *statbuf, fuse_file_info* fi) {
-        if(!fi)
+        if (!fi)
             return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetAttr(path, statbuf, fi);
         return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetAttr("", statbuf, fi);
     }

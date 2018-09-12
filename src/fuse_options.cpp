@@ -26,7 +26,6 @@ using boost::endian::native_to_big;
 using boost::endian::big_to_native;
 namespace fs = std::experimental::filesystem;
 
-
 using Txn = std::unique_ptr<rocksdb::Transaction>;
 
 #define CheckStatus(s)\
@@ -36,9 +35,6 @@ using Txn = std::unique_ptr<rocksdb::Transaction>;
 				return -EBUSY;\
 			if (!s.ok())\
 				return -EIO;
-
-
-
 
 namespace
 {
@@ -73,7 +69,7 @@ namespace
 		if (uid == attr.uid)
 			flag = (attr.mode >> 6) & 7; //rwx------
 		else if (gid == attr.gid)//同上
-			flag = (attr.mode >> 3) & 7;//---rwx---	
+			flag = (attr.mode >> 3) & 7;//---rwx---
 		else
 			flag = (attr.mode >> 0) & 7;//------rwx
 		auto accessible = true;
@@ -105,15 +101,12 @@ bool Locker::Release(int64_t inode)
 	lock_guard<mutex> l(mtx);
 	const auto counter = --map[inode] ;
 	assert(counter >= 0);
-	if(counter == 0)
+	if (counter == 0)
 		map.erase(inode);
 	return counter == 0;
 }
 
-
-
-
-rocksfs::FileSystemOptions::~FileSystemOptions()
+FileSystemOptions::~FileSystemOptions()
 {
 	db->DestroyColumnFamilyHandle(hIndex);
 	db->DestroyColumnFamilyHandle(hData);
@@ -138,10 +131,10 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 	rocksdb::TransactionDB* dbPtr = nullptr;
 	std::vector<ColumnFamilyHandle*> handles;
 	string path_actual(path);
-	if(!path.empty() && path[0] == '~')
+	if (!path.empty() && path[0] == '~')
 	{
 		string home = getenv("HOME");
-		if(home.empty())
+		if (home.empty())
 		{
 			puts("get home path fail");
 			exit(1);
@@ -151,7 +144,6 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 
 	Status s = TransactionDB::Open(options, TransactionDBOptions(), path_actual, descriptors, &handles, &dbPtr);
 
-	
 	if (!s.ok())
 	{
         delete dbPtr;
@@ -170,7 +162,7 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 		int64_t counter;
 		memmove(&counter, itor->key().data(), sizeof(int64_t));
 		inodeCounter = ReadBigEndian64(itor->key().data()) + 1;
-	}	
+	}
 	else//shall init database
 	{
 		const string root_inode(sizeof(uint64_t), '\0');
@@ -190,7 +182,11 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 	itor.reset( db->NewIterator(ReadOptions(), hDeleted));
 	for (itor->SeekToFirst(); itor->Valid(); itor->Next())//删除孤儿文件
 	{
-		db->Delete(WriteOptions(),hData, itor->key());//TODO 文件分块时需要删除range
+
+		unique_ptr<Iterator> deleter{ db->NewIterator(ReadOptions(), hData) };
+		for (deleter->Seek(itor->key()); deleter->Valid()&& deleter->key().starts_with(itor->key()); deleter->Next())
+			db->Delete(WriteOptions(), hData, deleter->key());
+
 		db->Delete(WriteOptions(),hAttr, itor->key());
 		db->Delete(WriteOptions(),hDeleted, itor->key());
 	}
@@ -207,7 +203,7 @@ void* FileSystemOptions::Init(fuse_conn_info* conn, fuse_config *cfg)
 	return nullptr;
 }
 
-int rocksfs::FileSystemOptions::Access(const std::string& path, int mask)
+int FileSystemOptions::Access(const std::string& path, int mask)
 {
 	auto idx = GetIndex(path);
 	if (idx.Bad())
@@ -229,7 +225,7 @@ int FileSystemOptions::GetAttr(const std::string& path, struct stat* stbuf, fuse
 
 	string buf;
     string key;
-    if(fi)
+    if (fi)
     {
         key = Encode(fi->fh);
     }
@@ -259,11 +255,11 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 	string encodedAttr;
 	Status s = db->Get(ReadOptions(), hAttr, encoded_inode, &encodedAttr);
 	Attr attr{};
-	if(!Attr::Decode(encodedAttr,&attr))
+	if (!Attr::Decode(encodedAttr,&attr))
 	{
 		return -EIO;
 	}
-	if(!S_ISDIR(attr.mode))
+	if (!S_ISDIR(attr.mode))
 	{
 		return -ENOTDIR;
 	}
@@ -277,15 +273,15 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 		if (itor->key() == Encode(0))
 			continue;
 		constexpr auto filename_offset = sizeof(uint64_t) + 1;
-        
+
         const string filename = itor->key().ToString().substr(filename_offset);
 		string attr_str;
         const string fileinode = itor->value().ToString();
 		s = db->Get(ReadOptions(), hAttr, fileinode, &attr_str);
-		
+
 		Attr file_attr{};
 		struct stat stbuf {};
-		if(s.ok() && Attr::Decode(attr_str, &file_attr))
+		if (s.ok() && Attr::Decode(attr_str, &file_attr))
 		{
 			file_attr.Fill(&stbuf);
 			filler(buf, filename.data(), &stbuf, 0, zero);
@@ -301,7 +297,7 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 {
 	auto index = GetIndex(path);
-	if(index.Bad())
+	if (index.Bad())
 	{
 		return -ENOENT;
 	}
@@ -311,13 +307,13 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 	CheckStatus(s);
 	Attr attr{};
 	Attr::Decode(attrbuf,&attr);
-	if(S_ISDIR(attr.mode))
+	if (S_ISDIR(attr.mode))
 	{
 		return -EISDIR;
 	}
 
 	unsigned open_flags = 0;
-	switch(fi->flags)
+	switch (fi->flags)
 	{
 	case O_WRONLY:open_flags |= W_OK;break;
 	case O_RDONLY:open_flags |= R_OK; break;
@@ -328,18 +324,16 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 	if (!Accessible(attr, open_flags))
 		return -EACCES;
 
-	
-
 	if ((fi->flags&O_ACCMODE) == O_WRONLY && !(fi->flags & O_APPEND))//如果不是追加(清零写)则需要修改文件属性
 	{
 		// merge
 		attr.size = 0;
 		attr.mtime = attr.ctime = Now();
 		txn->Put(hAttr, index.Key(), attr.Encode());
-		
+
 		//TODO truncate 的优化
 		unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
-		
+
 		//truncate
 		for (itor->Seek(index.Key()); itor->Valid()&&itor->key().starts_with(index.Key()); itor->Next())
 		{
@@ -351,7 +345,7 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 
 	fi->fh = index.inode;
 	opening_files.Open(fi->fh);
-	
+
 	return 0;
 }
 
@@ -360,7 +354,7 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
 	if (!fi)
 		return -EIO;
 
-	const string encoded_inode = Encode(fi->fh);	
+	const string encoded_inode = Encode(fi->fh);
 	assert(encoded_inode != Encode(0)&&!encoded_inode.empty());
 	Txn txn{ db->BeginTransaction(WriteOptions()) };
 
@@ -368,16 +362,14 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
 	//锁文件,准备 iterator
 	Status s = txn->GetForUpdate(ReadOptions(), hAttr, Encode(fi->fh), &attr_buf);
 
-
 	Attr attr{};
-	if(!Attr::Decode(attr_buf,&attr))
+	if (!Attr::Decode(attr_buf,&attr))
 	{
 		return -EIO;
 	}
 	if (offset >= attr.size)
 		return 0;
 
-	
 	//TODO 可能的优化，考虑加入 iterator_lower_bound和 iterator_upper_bound
 	std::unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
 	txn->UndoGetForUpdate(hAttr, Encode(fi->fh));
@@ -405,7 +397,7 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
 
 			assert(read_end <= kPageSize);
 			if (read_start < slice.size())//起始处有slice数据
-			{	
+			{
 				assert(!encoded_inode.empty());
 				if (zero_bytes <= 0)//全部在slice内读取
 				{
@@ -420,7 +412,7 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
 					buf += read_bytes;
 					size -= read_bytes;
 				}
-				else//读取数据有一部分在slice之外(但小于4k)，zero_bytes > 0 
+				else//读取数据有一部分在slice之外(但小于4k)，zero_bytes > 0
 				{
 					//|-------slice--------|
 					//start               slice.size()              4k
@@ -440,7 +432,7 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
 					offset += read_bytes;
 				}
 			}
-			else//读取部分在块空洞中,offset%4k >= slize.size() 
+			else//读取部分在块空洞中,offset%4k >= slize.size()
 			{
 				assert(!encoded_inode.empty());
 				//|-------Slice-------|
@@ -475,10 +467,8 @@ int FileSystemOptions::Create(const std::string& path, mode_t mode, fuse_file_in
 	if (mode & (S_IFCHR | S_IFIFO | S_IFBLK))//不支持字符设备、管道以及块设备创建
 		return -ENOTSUP;
 
-
 	if (path == "/")
 		return -EEXIST;
-
 
 	Txn txn{ db->BeginTransaction(WriteOptions()) };
 	auto parentIdx = GetIndexAndLock(fs::path(path).parent_path().generic_string(), txn);
@@ -522,7 +512,6 @@ int FileSystemOptions::Create(const std::string& path, mode_t mode, fuse_file_in
 	txn->Put(hAttr, file_index.Key(), attr.Encode());
 	txn->Put(hAttr, parentIdx.Key(), parAttr.Encode());
 
-
 	if (!txn->Commit().ok())
 		return -EIO;
 
@@ -530,11 +519,6 @@ int FileSystemOptions::Create(const std::string& path, mode_t mode, fuse_file_in
 	opening_files.Open(fi->fh);
     return 0;
 }
-
-
-
-
-
 
 //TODO delete 如果失败，那么可能会导致某些文件块泄露
 //一个可行的办法是在将hDeleted中记录的key延后删除--仅当检测文件完全删除后才
@@ -548,7 +532,7 @@ int FileSystemOptions::Release(struct fuse_file_info* fi)
     Attr attr{};
     if (all_closed && Attr::Decode(attrBuf, &attr))
     {
-        if(attr.nlink == 0)
+        if (attr.nlink == 0)
         {
 			//TODO可以考虑这些删除动作异步执行,或者单独抽出删除data和attr的动作。
             txn->Delete(hIndex, Encode(fi->fh));
@@ -586,7 +570,7 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 	{
 		return -EIO;
 	}
-	
+
 	// TODO 检查一下这里的flags是否会被填充。
 	if (fi->flags & O_APPEND)
 		offset = attr.size;
@@ -603,7 +587,7 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 		string data_block;
 		auto block_index = PageIndex(fi->fh, offset);
 		Status s = txn->GetForUpdate(ReadOptions(), hData, block_index, &data_block);
-	
+
 		const size_t write_start = offset % kPageSize;
 		const auto write_end = std::min(write_start + size, kPageSize);
 		const auto block_write_bytes = write_end - write_start;
@@ -615,7 +599,7 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 		}
 		else if (s.IsNotFound())
 		{
-			data_block = std::string(block_write_bytes, '\0');
+			data_block = std::string(write_end, '\0');
 			//TODO 这里可以维护block块数目。
 		}
 		else if (s.IsNoSpace())
@@ -651,21 +635,20 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
 
 //TODO 确定一下unlink是否需要检查对父目录的权限(FUSE会不会自动处理)
 //TODO 检测sitcky位(限制仅能用户本人删除文件)
-int rocksfs::FileSystemOptions::Unlink(const std::string& path)
+int FileSystemOptions::Unlink(const std::string& path)
 {
-    
-    
-    Txn txn{ db->BeginTransaction(WriteOptions()) }; 
+
+    Txn txn{ db->BeginTransaction(WriteOptions()) };
 	auto fidx = GetIndexAndLock(path,txn);//锁索引
     string attrBuf,parAttrBuf;
     txn->GetForUpdate(ReadOptions(), hAttr, Encode(fidx.parentInode), &parAttrBuf);
     txn->GetForUpdate(ReadOptions(), hAttr, fidx.Key(), &attrBuf);
     Attr attr{},parAttr{};
-    if(!Attr::Decode(attrBuf,&attr))
+    if (!Attr::Decode(attrBuf,&attr))
     {
         return 0;
     }
-    if(!Attr::Decode(parAttrBuf,&parAttr))
+    if (!Attr::Decode(parAttrBuf,&parAttr))
     {
         return 0;
     }
@@ -674,7 +657,7 @@ int rocksfs::FileSystemOptions::Unlink(const std::string& path)
 
     attr.ctime = parAttr.mtime = parAttr.ctime = Now();
     txn->Delete(hIndex, fidx.Index());
-    if(--attr.nlink == 0)
+    if (--attr.nlink == 0)
     {
 		//由于上面已经将文件名锁住，因此，在本删除过程执行完之前，
 		//其他线程无法打开待删除文件，所以不用加锁。
@@ -704,7 +687,7 @@ int rocksfs::FileSystemOptions::Unlink(const std::string& path)
     return -EIO;
 }
 
-int rocksfs::FileSystemOptions::OpenDir(const std::string& path, fuse_file_info* fi)
+int FileSystemOptions::OpenDir(const std::string& path, fuse_file_info* fi)
 {
     auto idx = GetIndex(path);
     fi->fh = idx.inode;
@@ -716,7 +699,7 @@ int rocksfs::FileSystemOptions::OpenDir(const std::string& path, fuse_file_info*
     {
         return -EIO;
     }
-   
+
     if (!Accessible(attr, R_OK))
         return -EACCES;
 
@@ -730,7 +713,7 @@ int FileSystemOptions::ReleaseDir(fuse_file_info* fi)
 int FileSystemOptions::Utimens(const std::string& path, const timespec tv[2], fuse_file_info* fi)
 {
     string inode;
-    if(fi)
+    if (fi)
         inode = Encode(fi->fh);
     else
     {
@@ -740,14 +723,13 @@ int FileSystemOptions::Utimens(const std::string& path, const timespec tv[2], fu
         inode = idx.Key();
     }
 
-
     Txn txn{ db->BeginTransaction(WriteOptions()) };
     string attr_buf;
     Status s = txn->GetForUpdate(ReadOptions(), hAttr, inode, &attr_buf);
     if (!s.ok())
         return -EIO;
     Attr attr{};
-    if(!Attr::Decode(attr_buf,&attr))
+    if (!Attr::Decode(attr_buf,&attr))
     {
         return -EIO;
     }
@@ -758,7 +740,7 @@ int FileSystemOptions::Utimens(const std::string& path, const timespec tv[2], fu
     if (!Accessible(attr, W_OK))
         return -EACCES;
 
-    if(!tv)
+    if (!tv)
     {
         attr.atime = attr.mtime = now;
     }
@@ -802,7 +784,6 @@ int FileSystemOptions::MkDir(const std::string& path, mode_t mode)
 	if (!S_ISDIR(par_attr.mode))
 		return -ENOTDIR;
 
-
 	FileIndex dir_idx{ par_idx.inode,dir_path.filename().generic_string() };
 	dir_idx.inode = inodeCounter++;
 	Attr file_attr = Attr::CreateDir(dir_idx.inode);
@@ -818,7 +799,6 @@ int FileSystemOptions::MkDir(const std::string& path, mode_t mode)
 
 	return 0;
 }
-
 
 int FileSystemOptions::Rmdir(const std::string& path)
 {
@@ -841,7 +821,7 @@ int FileSystemOptions::Rmdir(const std::string& path)
 	//TODO 黏着位
     string ignore;
     txn->GetForUpdate(ReadOptions(), hIndex, file_index.Index(), &ignore);//锁
-    
+
     unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(),hIndex));
     itor->Seek(file_index.Key());//以本目录inode开始的文件一定是目录下的文件
     if (itor->Valid() && itor->key().starts_with(file_index.Key()))//目录不空
@@ -878,10 +858,10 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 	TransactionOptions op;
 	op.deadlock_detect = true;
 	Txn txn{ db->BeginTransaction(WriteOptions(), op) };
-	
+
 	fs::path src_path(oldpath), dest_path(newpath);
 	fs::path src_par_path(src_path.parent_path()), dest_par_path(dest_path.parent_path());
- 
+
 	auto src_par_idx = GetIndexAndLock(src_par_path.generic_string(), txn);
 	if (src_par_idx.Bad())
 		return static_cast<int>(src_par_idx.inode);//errno
@@ -908,7 +888,6 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 	Attr::Decode(dest_par_attr_buf, &dest_par_attr);
 	if (!Accessible(dest_par_attr, W_OK | X_OK))
 		return -EACCES;
-	
 
 	//源文件
 	string src_attr_buf;
@@ -918,12 +897,11 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 	Attr::Decode(src_attr_buf, &src_attr);
 	auto dest_idx = GetIndexAndLock(newpath, txn);//尝试锁定目标
 
-	
 	if (flags & RENAME_EXCHANGE)
 	{
 		if (dest_idx.inode == -ENOENT)
 			return -ENOENT;//RENAME_EXCHANGE保证必须交换，并且二者同时存在
-		
+
 		src_par_attr.ctime = src_par_attr.mtime = dest_par_attr.ctime = dest_par_attr.mtime = Now();
 		txn->Put(hAttr, src_par_idx.Key(), src_par_attr.Encode());
 		txn->Put(hAttr, src_par_idx.Key(), dest_par_attr.Encode());
@@ -934,21 +912,20 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 			return -EIO;
 		return 0;
 	}
-	
-	if(S_ISDIR(src_attr.mode))//目录
+
+	if (S_ISDIR(src_attr.mode))//目录
 	{
 		//目标必须不存在或者是空目录
-		if(!dest_idx.Bad())//目标存在,dest_idx已经初始化
+		if (!dest_idx.Bad())//目标存在,dest_idx已经初始化
 		{
 			if (dest_idx.inode != -ENOENT)
 				return static_cast<int>(dest_idx.inode);//errno
-
 
 			string dest_attr_buf;
 			s = txn->GetForUpdate(ReadOptions(),hAttr, dest_idx.Key(), &dest_attr_buf);
 			Attr dest_attr{};
 			Attr::Decode(dest_attr_buf, &dest_attr);
-			if(S_ISDIR(dest_attr.mode))
+			if (S_ISDIR(dest_attr.mode))
 			{
 				unique_ptr<Iterator> itor (txn->GetIterator(ReadOptions(), hIndex));
 				itor->Seek(dest_idx.Key());
@@ -978,7 +955,7 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 	}
 	else//文件
 	{
-		if(!dest_idx.Bad())//目标存在,dest_idx已经初始化
+		if (!dest_idx.Bad())//目标存在,dest_idx已经初始化
 		{
 			if (dest_idx.inode != -ENOENT)
 				return static_cast<int>(dest_idx.inode);
@@ -1012,7 +989,7 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 	//写入新目录
 	//更新两者父目录的time
 	//更新二者的time
-	
+
 	txn->Put(hAttr, src_par_idx.Key(), src_par_attr.Encode());
 	txn->Put(hAttr, src_idx.Key(), src_attr.Encode());
 	txn->Put(hAttr, dest_par_idx.Key(), dest_par_attr.Encode());
@@ -1022,7 +999,7 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
 		return -EIO;
 	return 0;
 }
-int rocksfs::FileSystemOptions::Truncate(off_t offset, fuse_file_info * fi)
+int FileSystemOptions::Truncate(off_t offset, fuse_file_info * fi)
 {
 	if (!fi)
 		return -EIO;//文件没有打开
@@ -1065,20 +1042,19 @@ int rocksfs::FileSystemOptions::Truncate(off_t offset, fuse_file_info * fi)
 //https://unix.stackexchange.com/questions/233275/hard-link-creation-permissions
 //Hardlinks:
 
-//On systems that have user - writable directories on the same partition as system files, 
-//a long - standing class of security issues is the hardlink - based time - of - check - time - of - use race, 
+//On systems that have user - writable directories on the same partition as system files,
+//a long - standing class of security issues is the hardlink - based time - of - check - time - of - use race,
 //most commonly seen in world - writable directories like / tmp.
-//The common method of exploitation of this flaw is to cross privilege boundaries 
+//The common method of exploitation of this flaw is to cross privilege boundaries
 //when following a given hardlink(i.e.a root process follows a hardlink created by another user).
-//Additionally, an issue exists where users can "pin" a potentially vulnerable setuid / setgid file 
+//Additionally, an issue exists where users can "pin" a potentially vulnerable setuid / setgid file
 //so that an administrator will not actually upgrade a system fully.
 
-//The solution is to permit hardlinks to only be created when the user is already the existing file's owner, 
+//The solution is to permit hardlinks to only be created when the user is already the existing file's owner,
 //or if they already have read/write access to the existing file.
 //经测试,fuse会自动拦截对于目录建立硬链接
-int rocksfs::FileSystemOptions::Link(const std::string& src_path, const std::string& newpath)
+int FileSystemOptions::Link(const std::string& src_path, const std::string& newpath)
 {
-
 
 	const auto src_par_path = fs::path(src_path).parent_path().generic_string();
 	const auto new_parent_path = fs::path(newpath).parent_path().generic_string();
@@ -1087,7 +1063,7 @@ int rocksfs::FileSystemOptions::Link(const std::string& src_path, const std::str
 	op.deadlock_detect = true;
 	Txn txn{ db->BeginTransaction(WriteOptions(), op) };
 	auto src_par_idx = GetIndexAndLock(src_par_path, txn);//锁旧父目录索引
-	if(src_par_idx.Bad())
+	if (src_par_idx.Bad())
 		return static_cast<int>(src_par_idx.inode);//errno
 
 	auto src_idx = GetIndexAndLock(src_path, txn);//锁原目标索引
@@ -1101,7 +1077,6 @@ int rocksfs::FileSystemOptions::Link(const std::string& src_path, const std::str
 		return -EISDIR;
 	//TODO 权限检测:文件的所有者，或者是对于文件有读写权限，
 	//并且需要对于源目录和目标目录有写和执行权限。
-
 
 	auto dest_par_idx = GetIndexAndLock(new_parent_path, txn);//锁目标目录索引
 	if (dest_par_idx.Bad())
@@ -1141,7 +1116,6 @@ int rocksfs::FileSystemOptions::Link(const std::string& src_path, const std::str
 	s = txn->Put(hAttr, dest_par_idx.Key(), attr.Encode());
 	CheckStatus(s);
 
-
 	FileIndex new_idx(dest_par_idx.inode, fs::path(newpath).filename().generic_string());
 	s = txn->Put(hIndex, new_idx.Index(), Encode(src_idx.inode));//添加文件名
 	s = txn->Commit();
@@ -1161,7 +1135,7 @@ int FileSystemOptions::Chmod(const std::string& path, mode_t mode, fuse_file_inf
 	Txn txn(db->BeginTransaction(WriteOptions()));
 	string attr_buf;
 	string encoded_inode;
-	if(!fi)
+	if (!fi)
 	{
 		auto idx = GetIndexAndLock(path, txn);
 		if (idx.Bad())
@@ -1178,10 +1152,10 @@ int FileSystemOptions::Chmod(const std::string& path, mode_t mode, fuse_file_inf
 	Attr attr{};
 	if (!Attr::Decode(attr_buf, &attr))
 		return -EIO;
-	
+
 	if (fuse_get_context()->gid != 0 && attr.uid != fuse_get_context()->gid)
 		return -EPERM;
-	
+
 	attr.mode = mode;
 	attr.ctime = Now();
 	txn->Put(hAttr, encoded_inode, attr.Encode());
@@ -1190,7 +1164,7 @@ int FileSystemOptions::Chmod(const std::string& path, mode_t mode, fuse_file_inf
 	return 0;
 }
 
-int rocksfs::FileSystemOptions::Chown(const std::string& path, uid_t uid, gid_t gid, fuse_file_info * fi)
+int FileSystemOptions::Chown(const std::string& path, uid_t uid, gid_t gid, fuse_file_info * fi)
 {
 	Txn txn(db->BeginTransaction(WriteOptions()));
 	string attr_buf;
@@ -1223,13 +1197,13 @@ int rocksfs::FileSystemOptions::Chown(const std::string& path, uid_t uid, gid_t 
 		return -EIO;
 	return 0;
 }
-int rocksfs::FileSystemOptions::SymLink(const std::string& target, const std::string& linkpath)
+int FileSystemOptions::SymLink(const std::string& target, const std::string& linkpath)
 {
 	Txn txn(db->BeginTransaction(WriteOptions()));
 	string buf;
 
 	auto fidx = GetIndexAndLock(linkpath, txn);
-	if(!fidx.Bad())
+	if (!fidx.Bad())
 		return -EEXIST;
 	if (fidx.inode != -ENOENT)
 		return static_cast<int>(fidx.inode);
@@ -1245,18 +1219,17 @@ int rocksfs::FileSystemOptions::SymLink(const std::string& target, const std::st
 	link_attr.mode = S_IFLNK | 777;
 	link_attr.size = target.size();
 	parent_attr.ctime = Now();
-	
+
 	txn->Put(hAttr, Encode(fidx.parentInode), parent_attr.Encode());//写入父目录属性
 	txn->Put(hIndex, fidx.Index(), fidx.Key());//写入文件
 	txn->Put(hData, fidx.Key(), target);//target name
 	txn->Put(hAttr, fidx.Key(), link_attr.Encode());
 	if (!txn->Commit().ok())
 		return -EIO;
-	
 
 	return 0;
 }
-int rocksfs::FileSystemOptions::ReadLink(const std::string& filepath, char* buf, size_t size)
+int FileSystemOptions::ReadLink(const std::string& filepath, char* buf, size_t size)
 {
 	auto file_index = GetIndex(filepath);
 	if (file_index.Bad())
@@ -1270,7 +1243,6 @@ int rocksfs::FileSystemOptions::ReadLink(const std::string& filepath, char* buf,
 	if (!(attr.mode & S_IFLNK))
 		return -EINVAL;
 
-
 	s = db->Get(ReadOptions(), hData, file_index.Key(), &target_name);
 	CheckStatus(s);
 	memcpy(buf, target_name.c_str(), std::min(size, target_name.size()));
@@ -1280,7 +1252,7 @@ int rocksfs::FileSystemOptions::ReadLink(const std::string& filepath, char* buf,
 	return 0;
 	//TODO 检测是否返回target_name.size()
 }
-int rocksfs::FileSystemOptions::Mknod(const std::string& path, mode_t mode, dev_t dev)
+int FileSystemOptions::Mknod(const std::string& path, mode_t mode, dev_t dev)
 {
 
 	if (S_ISCHR(mode)||S_ISBLK(mode))//不支持字符设备和块设备
@@ -1288,7 +1260,6 @@ int rocksfs::FileSystemOptions::Mknod(const std::string& path, mode_t mode, dev_
 
 	if (path == "/")
 		return -EEXIST;
-
 
 	Txn txn{ db->BeginTransaction(WriteOptions()) };
 	auto parentIdx = GetIndexAndLock(fs::path(path).parent_path().generic_string(), txn);
@@ -1332,16 +1303,14 @@ int rocksfs::FileSystemOptions::Mknod(const std::string& path, mode_t mode, dev_
 	txn->Put(hAttr, file_index.Key(), attr.Encode());
 	txn->Put(hAttr, parentIdx.Key(), parAttr.Encode());
 
-
 	if (!txn->Commit().ok())
 		return -EIO;
-
 
 	return 0;
 }
 #ifdef HAVE_SETXATTR
 //TODO 权限检测
-int rocksfs::FileSystemOptions::SetXattr(const std::string& path, const std::string& name, const void* value, size_t size, int flags)
+int FileSystemOptions::SetXattr(const std::string& path, const std::string& name, const void* value, size_t size, int flags)
 {
 
 	Txn txn(db->BeginTransaction(WriteOptions()));
@@ -1357,7 +1326,7 @@ int rocksfs::FileSystemOptions::SetXattr(const std::string& path, const std::str
 	return 0;
 }
 
-int rocksfs::FileSystemOptions::GetXattr(const std::string& path, const std::string& name, char* buf, size_t size)
+int FileSystemOptions::GetXattr(const std::string& path, const std::string& name, char* buf, size_t size)
 {
 	auto fidx = GetIndex(path);
 	if (fidx.Bad())
@@ -1371,7 +1340,7 @@ int rocksfs::FileSystemOptions::GetXattr(const std::string& path, const std::str
 	return 0;
 }
 //TODO 权限检测
-int rocksfs::FileSystemOptions::ListXattr(const std::string& path, char* buf, size_t size)
+int FileSystemOptions::ListXattr(const std::string& path, char* buf, size_t size)
 {
 
 	auto idx = GetIndex(path);
@@ -1393,7 +1362,7 @@ int rocksfs::FileSystemOptions::ListXattr(const std::string& path, char* buf, si
 	return size_orig - size;
 }
 //TODO 权限检测
-int rocksfs::FileSystemOptions::RemoveXattr(const std::string& path, const std::string & name)
+int FileSystemOptions::RemoveXattr(const std::string& path, const std::string & name)
 {
 
 	auto idx = GetIndex(path);
@@ -1410,19 +1379,6 @@ int rocksfs::FileSystemOptions::RemoveXattr(const std::string& path, const std::
 	return 0;
 }
 #endif // HAVE_SETXATTR
-
-
-
-#include <string>
-#include <experimental/filesystem>
-#include <rocksdb/utilities/transaction_db.h>
-#include "fuse_options.hpp"
-#include "util.hpp"
-
-using namespace rocksdb;
-using namespace rocksfs;
-using namespace std;
-namespace fs = std::experimental::filesystem;
 
 FileIndex FileSystemOptions::GetIndex(const std::string& path) const
 {
@@ -1475,7 +1431,6 @@ FileIndex FileSystemOptions::GetIndexAndLock(const std::string & path, std::uniq
 	}
 	string encoded_idx;
 	const auto filename = file_path.filename();
-
 
 	FileIndex res{ parentIdx.inode,file_path.filename().generic_string() };
 	const auto idx = res.Index();
