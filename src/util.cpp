@@ -6,16 +6,6 @@
 using namespace std;
 using namespace rocksfs;
 
-timespec Now() {
-	const auto now = std::chrono::system_clock::now();
-	return timespec{
-		std::chrono::duration_cast<std::chrono::seconds>(
-			now.time_since_epoch()).count(),
-		std::chrono::duration_cast<std::chrono::nanoseconds>(
-			now.time_since_epoch()).count() % 1'000'000'000LL
-	};
-}
-
 timespec rocksfs::Now()
 {
     const auto now = std::chrono::system_clock::now();
