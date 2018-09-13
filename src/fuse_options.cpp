@@ -255,7 +255,7 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 	string encodedAttr;
 	Status s = db->Get(ReadOptions(), hAttr, encoded_inode, &encodedAttr);
 	Attr attr{};
-r::Decode(encodedAttr, &attr))	if (!Att
+	if (!Attr::Decode(encodedAttr, &attr))
 	{
 		return -EIO;
 	}
