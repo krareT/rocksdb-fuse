@@ -324,7 +324,7 @@ int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
 	if (!Accessible(attr, open_flags))
 		return -EACCES;
 
-	if ((fi->flags&O_ACCMODE) == O_WRONLY && !(fi->flags & O_APPEND))//如果不是追加(清零写)则需要修改文件属性
+	if (fi->flags & O_TRUNC)//如果不是追加(清零写)则需要修改文件属性
 	{
 		// merge
 		attr.size = 0;
