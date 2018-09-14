@@ -18,6 +18,14 @@ Unmount:
 
     fusermount -u <mountpoint>
 Depended:
-* rocksdb
+* rocksdb 5.4 or upper (for PinnableSlice)
 * fuse3.1 or upper
 * boost
+* linux-test-project/ltp (for testcases, optional)
+
+Run testcases:
+
+    cd LTPROOT
+    sudo ./runltp -f /path/to/rocksdb-fuse/fs-test -d <mountpoint>   -p -q \
+    [-l <logfile>] [-C <fail test cases>] [-o <redirect test output file>] 
+    
