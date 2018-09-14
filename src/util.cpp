@@ -18,27 +18,27 @@ timespec rocksfs::Now()
 }
 
 FileIndex::FileIndex(int64_t parentInode, std::string filename)
-	:parentInode(parentInode),filename(filename)
+    :parentInode(parentInode),filename(filename)
 {}
 
 FileIndex::FileIndex(const std::string& inializer)
 {
-	//file index: inode:filename
-	constexpr auto wide = sizeof(int64_t);//size of inode
-	assert(inializer.size() > wide && inializer[wide] == ':');
-	
-	parentInode = ReadBigEndian64(inializer.c_str());
-	filename = inializer.substr(sizeof(int64_t));
+    //file index: inode:filename
+    constexpr auto wide = sizeof(int64_t);//size of inode
+    assert(inializer.size() > wide && inializer[wide] == ':');
+    
+    parentInode = ReadBigEndian64(inializer.c_str());
+    filename = inializer.substr(sizeof(int64_t));
 }
 
 std::string FileIndex::GetFilename() const
 {
-	return filename;
+    return filename;
 }
 
 std::string FileIndex::Key()const
 {
-	return Encode(inode);
+    return Encode(inode);
 }
 
 std::string FileIndex::Index() const
@@ -51,18 +51,18 @@ std::string FileIndex::Index() const
 
 std::string rocksfs::Encode(int64_t inode)
 {
-	union {
-		char buf[8];
-		int64_t val;
-	}conv;
-	conv.val = boost::endian::native_to_big(inode);
+    union {
+        char buf[8];
+        int64_t val;
+    }conv;
+    conv.val = boost::endian::native_to_big(inode);
     return string(conv.buf, sizeof (int64_t));
 }
 
 bool rocksfs::StartsWith(const std::string& mainstr, const std::string& substr)
 {
-	return substr.length() <= mainstr.length()
-		&& equal(substr.begin(), substr.end(), mainstr.begin());
+    return substr.length() <= mainstr.length()
+        && equal(substr.begin(), substr.end(), mainstr.begin());
 }
 
 

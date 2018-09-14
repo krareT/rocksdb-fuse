@@ -27,7 +27,7 @@ namespace
         return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Open(path, fi);
     }
     int s_read(const char *path, char *buf, std::size_t size, off_t offset, struct fuse_file_info *fi) {
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Read(buf, size, offset, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Read(buf, size, offset, fi);
     }
     int s_write(const char *path, const char *buf, std::size_t size, off_t offset, struct fuse_file_info *fi) {
         return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Write(buf, size, offset, fi);
@@ -65,59 +65,59 @@ namespace
         return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Rmdir(path);
     }
 
-	int s_link(const char* oldpath, const char* newpath)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Link(oldpath, newpath);
-	}
-	int s_flush(const char* , struct fuse_file_info* fi)
+    int s_link(const char* oldpath, const char* newpath)
     {
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Flush(fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Link(oldpath, newpath);
     }
-	int s_chmod(const char * path, mode_t mode, struct fuse_file_info *fi)
+    int s_flush(const char* , struct fuse_file_info* fi)
     {
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Chmod(path, mode, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Flush(fi);
     }
-	int s_chown(const char * path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
+    int s_chmod(const char * path, mode_t mode, struct fuse_file_info *fi)
     {
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Chown(path, uid, gid, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Chmod(path, mode, fi);
     }
-	int s_truncate(const char* path, off_t offset, struct fuse_file_info *fi)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Truncate(offset, fi);
-	}
-	int s_access(const char* path, int mask)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Access(path, mask);
-	}
-	int s_symlink(const char* targetname, const char *filename)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->SymLink(targetname, filename);
-	}
-	int s_readlink(const char* link, char* buf, size_t size)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->ReadLink(link, buf, size);
-	}
-	int s_mknod(const char* path, mode_t mode, dev_t dev)
+    int s_chown(const char * path, uid_t uid, gid_t gid, struct fuse_file_info *fi)
     {
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Mknod(path, mode, dev);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Chown(path, uid, gid, fi);
+    }
+    int s_truncate(const char* path, off_t offset, struct fuse_file_info *fi)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Truncate(offset, fi);
+    }
+    int s_access(const char* path, int mask)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Access(path, mask);
+    }
+    int s_symlink(const char* targetname, const char *filename)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->SymLink(targetname, filename);
+    }
+    int s_readlink(const char* link, char* buf, size_t size)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->ReadLink(link, buf, size);
+    }
+    int s_mknod(const char* path, mode_t mode, dev_t dev)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Mknod(path, mode, dev);
     }
 #ifdef HAVE_SETXATTR
-	int s_setxattr(const char *path, const char *name, const char *value, size_t size, int flags)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->SetXattr(path, name, value, size, flags);
-	}
-	int s_getxattr(const char *path, const char *name, char *value, size_t size)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetXattr(path, name, value, size);
-	}
-	int s_listxattr(const char *path, char *list, size_t size)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->ListXattr(path, list, size);
-	}
-	int s_removexattr(const char *path, const char *name)
-	{
-		return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->RemoveXattr(path, name);
-	}
+    int s_setxattr(const char *path, const char *name, const char *value, size_t size, int flags)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->SetXattr(path, name, value, size, flags);
+    }
+    int s_getxattr(const char *path, const char *name, char *value, size_t size)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->GetXattr(path, name, value, size);
+    }
+    int s_listxattr(const char *path, char *list, size_t size)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->ListXattr(path, list, size);
+    }
+    int s_removexattr(const char *path, const char *name)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->RemoveXattr(path, name);
+    }
 #endif // HAVE_SETXATTR
 }
 
@@ -139,20 +139,20 @@ int FileSystemOptions::Mount(int argc, char* argv[])
     res.unlink = s_unlink;
     res.mkdir = s_mkdir;
     res.rmdir = s_rmdir;
-	res.link = s_link;
-	res.flush = s_flush;
-	res.chown = s_chown;
-	res.chmod = s_chmod;
-	res.truncate = s_truncate;
-	res.access = s_access;
-	res.readlink = s_readlink;
-	res.symlink = s_symlink;
-	res.mknod = s_mknod;
+    res.link = s_link;
+    res.flush = s_flush;
+    res.chown = s_chown;
+    res.chmod = s_chmod;
+    res.truncate = s_truncate;
+    res.access = s_access;
+    res.readlink = s_readlink;
+    res.symlink = s_symlink;
+    res.mknod = s_mknod;
 #ifdef HAVE_SETXATTR
-	res.setxattr = s_setxattr;
-	res.getxattr = s_getxattr;
-	res.removexattr = s_removexattr;
-	res.listxattr = s_listxattr;
+    res.setxattr = s_setxattr;
+    res.getxattr = s_getxattr;
+    res.removexattr = s_removexattr;
+    res.listxattr = s_listxattr;
 #endif // HAVE_SETXATTR
 
 

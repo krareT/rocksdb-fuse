@@ -26,6 +26,6 @@ Depended:
 Run testcases:
 
     cd LTPROOT
-    sudo ./runltp -f /path/to/rocksdb-fuse/fs-test -d <mountpoint>   -p -q \
+    sudo ./runltp -f /path/to/rocksdb-fuse/ltp-testcases -d <mountpoint>   -p -q \
     [-l <logfile>] [-C <fail test cases>] [-o <redirect test output file>] 
     
