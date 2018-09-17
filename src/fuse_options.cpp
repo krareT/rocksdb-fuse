@@ -199,6 +199,7 @@ void* FileSystemOptions::Init(fuse_conn_info* conn, fuse_config *cfg)
     cfg->kernel_cache = 1;
     cfg->hard_remove = 1;
     cfg->nullpath_ok = 1;
+    cfg->use_ino = 1;
     cfg->remember = -1;
     return nullptr;
 }

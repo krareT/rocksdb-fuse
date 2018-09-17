@@ -11,6 +11,7 @@ using namespace rocksfs;
 */
 struct myfs_opts {
     char* dbpath = nullptr;
+    int debugfs = 0;
     int is_help;
 }myfs_opts;
 
@@ -27,6 +28,7 @@ static const char *usage =
 
 static const struct fuse_opt option_spec[] = {
     MYFS_OPT("--dbpath=%s",dbpath),
+    MYFS_OPT("--debugfs",debugfs),
     FUSE_OPT_KEY("-h",	0),
     FUSE_OPT_KEY("--help",	0),
     FUSE_OPT_END
@@ -72,10 +74,16 @@ int main(int argc, char* argv[])
         }
     }
     fuse_opt_add_arg(&args, "-oauto_unmount");
-    fuse_opt_add_arg(&args,"-f");
-
-    rocksfs::FileSystemOptions fs(config.dbpath);
-    daemon(1,0);
+    if(config.debugfs)
+    {
+        fuse_opt_add_arg(&args, "-d");
+    }
+    else
+    {
+        fuse_opt_add_arg(&args, "-f");
+        daemon(1, 0);
+    }
+	rocksfs::FileSystemOptions fs(config.dbpath);
     fs.Mount(args.argc, args.argv);
     return 0;
 }
