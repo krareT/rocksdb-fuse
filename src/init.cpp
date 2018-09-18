@@ -83,7 +83,7 @@ namespace
     }
     int s_truncate(const char* path, off_t offset, struct fuse_file_info *fi)
     {
-        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Truncate(offset, fi);
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Truncate(fi ? "" : path, offset, fi);
     }
     int s_access(const char* path, int mask)
     {

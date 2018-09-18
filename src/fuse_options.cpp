@@ -282,15 +282,9 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 
         Attr file_attr{};
         struct stat stbuf {};
-        if (s.ok() && Attr::Decode(attr_str, &file_attr))
-        {
-            file_attr.Fill(&stbuf);
-            filler(buf, filename.data(), &stbuf, 0, zero);
-        }
-        else
-        {
-            filler(buf, filename.data(), nullptr, 0, zero);
-        }
+        const bool decode_ok = Attr::Decode(attr_str,&file_attr);
+        assert(decode_ok);
+        filler(buf,filename.data(),&stbuf,0,zero);
     }
     return 0;
 }
@@ -1000,31 +994,47 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
         return -EIO;
     return 0;
 }
-int FileSystemOptions::Truncate(off_t offset, fuse_file_info * fi)
+//fuse打开文件内核时会将O_TRUNC过滤，此时会先调用Truncate之后再open。因此，此时的fi为nullptr
+int FileSystemOptions::Truncate(const std::string& path, off_t offset, fuse_file_info* fi)
 {
-    if (!fi)
-        return -EIO;//文件没有打开
+    uint64_t fd = -1;
+    if(fi)
+    {
+        fd = fi->fh;
+    }
+    else
+    {
+        auto file_index = GetIndex(path);
+        if(file_index.Bad())
+            return static_cast<int>(file_index.inode);
+        fd = file_index.inode;
+    }
+
+
     Txn txn{ db->BeginTransaction(WriteOptions()) };
-    const auto encoded_inode = Encode(fi->fh);
+    const auto encoded_inode = Encode(fd);
     string attr_buf;
     txn->GetForUpdate(ReadOptions(), hAttr, encoded_inode, &attr_buf);
     Attr attr{};
     const bool state = Attr::Decode(attr_buf, &attr);
     assert(state);
-    if (offset < attr.size)//扩容不用管。
-    {
-        unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
-        itor->Seek(PageIndex(encoded_inode, offset));
-        assert(itor->Valid());
-        string block = itor->value().ToString();
-        block.resize(offset%kPageSize);
+	if (offset < attr.size)//扩容不用改data。
+	{
+		unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
+		itor->Seek(PageIndex(encoded_inode, offset));
+		if(itor->key() == PageIndex(encoded_inode,offset))
+		{
+            string block = itor->value().ToString();
+            block.resize(offset%kPageSize);
+            txn->Put(hData, itor->key(), block);
+            itor->Next();
+		}
 
-        txn->Put(hData, itor->key(), block);
-        for (itor->Next(); itor->Valid() && itor->key().starts_with(encoded_inode); itor->Next())
-        {
-            txn->Delete(hData, itor->key());
-        }
-    }
+		for (; itor->Valid() && itor->key().starts_with(encoded_inode); itor->Next())
+		{
+			txn->Delete(hData, itor->key());
+		}
+	}
     attr.mtime = Now();
     attr.size = offset;
     txn->Put(hAttr, encoded_inode, attr.Encode());
@@ -1165,7 +1175,7 @@ int FileSystemOptions::Chmod(const std::string& path, mode_t mode, fuse_file_inf
     return 0;
 }
 
-int FileSystemOptions::Chown(const std::string& path, uid_t uid, gid_t gid, fuse_file_info * fi)
+int FileSystemOptions::Chown(const std::string& path, uid_t uid, gid_t gid, fuse_file_info* fi)
 {
     Txn txn(db->BeginTransaction(WriteOptions()));
     string attr_buf;

@@ -31,7 +31,7 @@ namespace rocksfs
         virtual int MkDir(const std::string& path, mode_t mode);
         virtual int Rmdir(const std::string& path);
         virtual int Rename(const std::string& oldpath, const std::string& newpath, unsigned flags);
-        virtual int Truncate(off_t offset, struct fuse_file_info *fi);
+        virtual int Truncate(const std::string& path, off_t offset, struct fuse_file_info *fi);
         virtual int Link(const std::string& oldpath, const std::string& newpath);//创建硬链接
         virtual int Flush(fuse_file_info* fi);
         virtual int Chmod (const std::string& path, mode_t, struct fuse_file_info *fi);
