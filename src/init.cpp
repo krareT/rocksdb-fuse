@@ -101,6 +101,10 @@ namespace
     {
         return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->Mknod(path, mode, dev);
     }
+    int s_statfs(const char* filepath, struct statvfs* buf)
+    {
+        return static_cast<FileSystemOptions*>(fuse_get_context()->private_data)->StatFs(filepath, buf);
+    }
 #ifdef HAVE_SETXATTR
     int s_setxattr(const char* path, const char* name, const char* value, size_t size, int flags)
     {
@@ -148,6 +152,7 @@ int FileSystemOptions::Mount(int argc, char* argv[])
     res.readlink = s_readlink;
     res.symlink = s_symlink;
     res.mknod = s_mknod;
+    res.statfs = s_statfs;
 #ifdef HAVE_SETXATTR
     res.setxattr = s_setxattr;
     res.getxattr = s_getxattr;

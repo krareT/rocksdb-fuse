@@ -1457,3 +1457,11 @@ FileIndex FileSystemOptions::GetIndexAndLock(const std::string& path, std::uniqu
     res.inode = ReadBigEndian64(encoded_idx.c_str());
     return res;
 }
+
+int FileSystemOptions::StatFs(const std::string& filepath, struct statvfs* buf)
+{
+    if (statvfs(db->GetName().c_str(), buf) == -1)
+        return -errno;
+
+    return 0;
+}
