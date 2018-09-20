@@ -193,7 +193,7 @@ FileSystemOptions::FileSystemOptions(const std::string& path)
 
 }
 
-void* FileSystemOptions::Init(fuse_conn_info* conn, fuse_config *cfg)
+void* FileSystemOptions::Init(fuse_conn_info* conn, fuse_config* cfg)
 {
     (void)conn;
     cfg->kernel_cache = 1;
@@ -282,14 +282,14 @@ int FileSystemOptions::ReadDir(void* buf, fuse_fill_dir_t filler, off_t offset, 
 
         Attr file_attr{};
         struct stat stbuf {};
-        const bool decode_ok = Attr::Decode(attr_str,&file_attr);
+        const bool decode_ok = Attr::Decode(attr_str, &file_attr);
         assert(decode_ok);
         filler(buf,filename.data(),&stbuf,0,zero);
     }
     return 0;
 }
 
-int FileSystemOptions::Open(const std::string& path, fuse_file_info * fi)
+int FileSystemOptions::Open(const std::string& path, fuse_file_info* fi)
 {
     auto index = GetIndex(path);
     if (index.Bad())
@@ -362,7 +362,7 @@ int FileSystemOptions::Read(char* buf, size_t size, off_t offset, fuse_file_info
     {
         return -EIO;
     }
-    if (offset >= attr.size)
+    if (static_cast<size_t>(offset) >= attr.size)
         return 0;
 
     //TODO 可能的优化，考虑加入 iterator_lower_bound和 iterator_upper_bound
@@ -548,7 +548,7 @@ int FileSystemOptions::Release(struct fuse_file_info* fi)
 }
 //TODO 检查readonly方式打开的文件能不能写。
 //TODO 尝试对于连续零的空洞block进行优化。
-int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, struct fuse_file_info *fi)
+int FileSystemOptions::Write(const char* buf, std::size_t size, off_t offset, struct fuse_file_info* fi)
 {
 
     const auto write_bytes = size;//备份size,写入总数
@@ -566,9 +566,6 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
         return -EIO;
     }
 
-    // TODO 检查一下这里的flags是否会被填充。
-    if (fi->flags & O_APPEND)
-        offset = attr.size;
     // page_start  write_start           write_end        page_end
     //  |__________|_________________________|________________|
     //             |<---block_write_bytes--->|
@@ -577,7 +574,7 @@ int FileSystemOptions::Write(const char *buf, std::size_t size, off_t offset, st
     //  |__________|_________________________|________________|
     //             |<---block_write_bytes--->|
     // where: write_start = offset % 4k
-    while (size > 0)
+    while (static_cast<ssize_t>(size) > 0)
     {
         string data_block;
         auto block_index = PageIndex(fi->fh, offset);
@@ -994,7 +991,8 @@ int FileSystemOptions::Rename(const std::string& oldpath, const std::string& new
         return -EIO;
     return 0;
 }
-//fuse打开文件内核时会将O_TRUNC过滤，此时会先调用Truncate之后再open。因此，此时的fi为nullptr
+//对于truncate(path, size),而不打开文件的系统调用，此处会直接转发到此调用, 此时fi=0
+//对于O_TRUNC, fuse会转发给open调用, 用户需要手动实现TRUNC语义。
 int FileSystemOptions::Truncate(const std::string& path, off_t offset, fuse_file_info* fi)
 {
     uint64_t fd = -1;
@@ -1018,7 +1016,7 @@ int FileSystemOptions::Truncate(const std::string& path, off_t offset, fuse_file
     Attr attr{};
     const bool state = Attr::Decode(attr_buf, &attr);
     assert(state);
-	if (offset < attr.size)//扩容不用改data。
+	if (static_cast<size_t>(offset) < attr.size)//扩容不用改data。
 	{
 		unique_ptr<Iterator> itor(txn->GetIterator(ReadOptions(), hData));
 		itor->Seek(PageIndex(encoded_inode, offset));
@@ -1373,7 +1371,7 @@ int FileSystemOptions::ListXattr(const std::string& path, char* buf, size_t size
     return size_orig - size;
 }
 //TODO 权限检测
-int FileSystemOptions::RemoveXattr(const std::string& path, const std::string & name)
+int FileSystemOptions::RemoveXattr(const std::string& path, const std::string& name)
 {
 
     auto idx = GetIndex(path);
@@ -1424,7 +1422,7 @@ FileIndex FileSystemOptions::GetIndex(const std::string& path) const
     return idx;
 }
 
-FileIndex FileSystemOptions::GetIndexAndLock(const std::string & path, std::unique_ptr<rocksdb::Transaction>& txn) const
+FileIndex FileSystemOptions::GetIndexAndLock(const std::string& path, std::unique_ptr<rocksdb::Transaction>& txn) const
 {
     if (path == "/")
     {

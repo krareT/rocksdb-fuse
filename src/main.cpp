@@ -17,7 +17,7 @@ struct myfs_opts {
 
 #define MYFS_OPT(t,p){t,offsetof(struct myfs_opts,p),1}
 
-static const char *usage =
+static const char* usage =
 "Usage: ./rocksdb-fuse [options] <mountpoint>\n\n"
 "options:\n"
 "    --help|-h		Print this help message\n"
@@ -35,7 +35,7 @@ static const struct fuse_opt option_spec[] = {
 };
 static int process_arg(void* data, const char* arg, int key, struct fuse_args* outargs)
 {
-    struct myfs_opts *param = static_cast<struct myfs_opts*>(data);
+    struct myfs_opts* param = static_cast<struct myfs_opts*>(data);
 
     (void)outargs;
     (void)arg;

@@ -1,10 +1,7 @@
 ﻿#include <string>
 #include <cstring>
-#include <stdexcept>
 #include <cmath>
 #include <boost/format.hpp>
-
-
 #include <sys/fcntl.h>
 
 #include "attr.hpp"
