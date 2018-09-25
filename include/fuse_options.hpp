@@ -39,6 +39,7 @@ namespace rocksfs
         virtual int SymLink(const std::string& filepath, const std::string& linkpath);
         virtual int ReadLink(const std::string& filepath, char* buf, size_t size);
         virtual int Mknod(const std::string& filepath, mode_t mode, dev_t dev);
+        virtual int StatFs(const std::string& filepath, struct statvfs* buf);
 #ifdef HAVE_SETXATTR
         virtual int SetXattr(const std::string& path, const std::string& name, const void* value, size_t size, int flags);
         virtual int GetXattr(const std::string& path, const std::string& name, char* buf, size_t size);
